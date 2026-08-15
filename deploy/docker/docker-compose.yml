@@ -14,9 +14,11 @@ services:
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
       - GCP_PROJECT=${GCP_PROJECT:-strong-zephyr-505611-k4}
       - GCP_ZONE=${GCP_ZONE:-europe-west3-a}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - control-plane-data:/app/data
+      - /tmp/virki_instances:/tmp/virki_instances
     networks:
       - virki-net
 

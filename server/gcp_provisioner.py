@@ -24,7 +24,11 @@ GCLOUD_BIN = os.environ.get("GCLOUD_BIN", "/home/peter/.local/share/google-cloud
 DEFAULT_PROJECT = os.environ.get("GCP_PROJECT", "strong-zephyr-505611-k4")
 DEFAULT_ZONE = os.environ.get("GCP_ZONE", "europe-west3-a")
 DEFAULT_MACHINE_TYPE = os.environ.get("GCP_MACHINE_TYPE", "e2-standard-4")
-DIST_REPO_URL = "https://github.com/NextChapterExperts/virgi-platform-dist.git"
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+if GITHUB_TOKEN:
+    DIST_REPO_URL = f"https://x-access-token:{GITHUB_TOKEN}@github.com/NextChapterExperts/virgi-platform-dist.git"
+else:
+    DIST_REPO_URL = "https://github.com/NextChapterExperts/virgi-platform-dist.git"
 
 
 def _run_gcloud(args: List[str]) -> Any:

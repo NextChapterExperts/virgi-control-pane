@@ -8,14 +8,10 @@ import {
   IconTrash,
   IconRefresh,
   IconCheck,
-  IconAlertTriangle,
   IconTerminal2,
   IconPlus,
-  IconReceipt2,
-  IconCalculator,
   IconShieldLock,
   IconBolt,
-  IconChevronDown,
   IconChevronUp,
 } from "@tabler/icons-react";
 
@@ -34,14 +30,7 @@ interface Instance {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
-// Reale GCP-Infrastrukturkosten (Frankfurt europe-west3)
-const MACHINE_COST_MONTHLY: Record<string, number> = {
-  "e2-standard-4": 113.0, // 4 vCPU, 16 GB RAM + 50 GB Balanced Disk
-  "e2-standard-8": 225.0, // 8 vCPU, 32 GB RAM + 100 GB Balanced Disk
-  "e2-medium": 32.0,      // 2 vCPU, 4 GB RAM + 30 GB Standard Disk
-};
-
-export default function SinglePageCommandCenter() {
+export default function OperationalCommandCenter() {
   const [instances, setInstances] = useState<Instance[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedLogsId, setSelectedLogsId] = useState<string | null>(null);
@@ -59,6 +48,7 @@ export default function SinglePageCommandCenter() {
   const [webPort, setWebPort] = useState(8190);
   const [apiPort, setApiPort] = useState(8191);
   const [provisioning, setProvisioning] = useState(false);
+  const [oneLineScript, setOneLineScript] = useState<string | null>(null);
 
   useEffect(() => {
     loadInstances();
@@ -109,7 +99,6 @@ export default function SinglePageCommandCenter() {
 
       if (!res.ok) throw new Error("Fehler beim Starten der Bereitstellung");
       
-      // Form zurücksetzen & Ports für nächste Instanz hochzählen
       setTenantId("");
       setCompanyName("");
       setWebPort((prev) => prev + 10);
@@ -121,6 +110,16 @@ export default function SinglePageCommandCenter() {
     } finally {
       setProvisioning(false);
     }
+  };
+
+  const handleFetchOneLineInstaller = () => {
+    if (!tenantId) {
+      alert("Bitte zuerst eine Mandanten-ID eingeben.");
+      return;
+    }
+    const cleanTenant = tenantId.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+    const script = `curl -sSL "${API_BASE}/v1/install/${cleanTenant}.sh?company=${encodeURIComponent(companyName || "Kunde")}&web_port=${webPort}&api_port=${apiPort}" | bash`;
+    setOneLineScript(script);
   };
 
   const handleDelete = async (id: string, name: string) => {
@@ -149,22 +148,13 @@ export default function SinglePageCommandCenter() {
     }
   };
 
-  const getInstanceCost = (inst: Instance): number => {
-    if (inst.type === "docker_stack") return 0.0;
-    const mType = inst.machine_type || "e2-standard-4";
-    return MACHINE_COST_MONTHLY[mType] || 113.0;
-  };
-
   // KPIs
   const activeCount = instances.filter((i) => i.status === "running").length;
   const gcpCount = instances.filter((i) => i.type === "gcp_vm").length;
   const dockerCount = instances.filter((i) => i.type === "docker_stack").length;
-  const totalCostMonthly = instances
-    .filter((i) => i.status === "running" || i.status === "provisioning")
-    .reduce((acc, i) => acc + getInstanceCost(i), 0);
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-8">
       {/* Header & KPI Bar */}
       <div>
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
@@ -174,7 +164,7 @@ export default function SinglePageCommandCenter() {
               VIRKI Control Plane
             </h1>
             <p className="text-xs sm:text-sm text-ink-soft mt-1">
-              Betreiber-Cockpit: Lokale Docker Stacks & Google Cloud VMs bereitstellen, überwachen und Kosten steuern.
+              Betreiber-Cockpit: Lokale Docker Stacks & Google Cloud VMs bereitstellen, überwachen und per Direkt-Link verwalten.
             </p>
           </div>
 
@@ -192,18 +182,25 @@ export default function SinglePageCommandCenter() {
               className="btn-primary text-xs flex items-center gap-1.5 py-2 px-4 shadow-sm"
             >
               {showProvisionForm ? <IconChevronUp size={16} /> : <IconPlus size={16} />}
-              <span>{showProvisionForm ? "Formular schließen" : "+ Neue Instanz bereitstellen"}</span>
+              <span>{showProvisionForm ? "Formular schließen" : "+ Instanz bereitstellen"}</span>
             </button>
           </div>
         </div>
 
-        {/* 4 KPI Cards */}
+        {/* 4 Pure Operational KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
           <div className="bg-card border border-line p-5 rounded-2xl">
+            <span className="text-xs text-ink-soft uppercase font-bold tracking-wider">Gesamt-Instanzen</span>
+            <div className="text-2xl sm:text-3xl font-black text-ink mt-2 font-mono">
+              {instances.length}
+            </div>
+          </div>
+
+          <div className="bg-card border border-line p-5 rounded-2xl">
             <span className="text-xs text-ink-soft uppercase font-bold tracking-wider">Aktive Instanzen</span>
-            <div className="text-2xl sm:text-3xl font-black text-ink mt-2 flex items-baseline gap-2">
+            <div className="text-2xl sm:text-3xl font-black text-emerald-500 mt-2 font-mono flex items-baseline gap-2">
               <span>{activeCount}</span>
-              <span className="text-xs text-ink-soft font-normal">/ {instances.length} Gesamt</span>
+              <span className="text-xs text-ink-soft font-normal">RUNNING</span>
             </div>
           </div>
 
@@ -211,9 +208,8 @@ export default function SinglePageCommandCenter() {
             <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1">
               <IconShieldLock size={14} className="text-amber-500" /> Lokale Docker Stacks
             </span>
-            <div className="text-2xl sm:text-3xl font-black text-ink mt-2 flex items-baseline gap-1 font-mono">
-              <span>{dockerCount}</span>
-              <span className="text-[11px] text-emerald-500 font-normal font-sans ml-2">0,00 € Host-Kosten</span>
+            <div className="text-2xl sm:text-3xl font-black text-ink mt-2 font-mono">
+              {dockerCount}
             </div>
           </div>
 
@@ -221,19 +217,8 @@ export default function SinglePageCommandCenter() {
             <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1">
               <IconBolt size={14} className="text-signal" /> Google Cloud VMs
             </span>
-            <div className="text-2xl sm:text-3xl font-black text-ink mt-2 flex items-baseline gap-1 font-mono">
-              <span>{gcpCount}</span>
-              <span className="text-[11px] text-ink-soft font-normal font-sans ml-2">in Frankfurt</span>
-            </div>
-          </div>
-
-          <div className="bg-card border border-line p-5 rounded-2xl">
-            <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1">
-              <IconReceipt2 size={14} className="text-amber-500" /> Monatliche Cloud-Kosten
-            </span>
-            <div className="text-2xl sm:text-3xl font-black text-amber-500 mt-2 flex items-baseline gap-1 font-mono">
-              <span>{totalCostMonthly.toFixed(2)} €</span>
-              <span className="text-[11px] text-ink-soft font-normal font-sans">/ Monat</span>
+            <div className="text-2xl sm:text-3xl font-black text-ink mt-2 font-mono">
+              {gcpCount}
             </div>
           </div>
         </div>
@@ -315,12 +300,12 @@ export default function SinglePageCommandCenter() {
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs font-bold font-mono text-amber-500 uppercase flex items-center gap-1.5">
-                      <IconShieldLock size={15} /> 🐳 Lokaler Docker Stack (0,00 €)
+                      <IconShieldLock size={15} /> 🐳 Lokaler Docker Stack
                     </span>
                     {deployType === "docker_stack" && <IconCheck size={16} className="text-amber-500" />}
                   </div>
                   <p className="text-xs text-ink-soft leading-relaxed">
-                    Startet sofort als Container-Stack auf dieser Maschine/VM. Schnellste Bereitstellung & 0 € Zusatzkosten.
+                    Startet sofort als Container-Stack auf dieser Maschine/VM. Schnellste Bereitstellung.
                   </p>
                 </button>
 
@@ -348,27 +333,46 @@ export default function SinglePageCommandCenter() {
 
             {/* Details je nach Ziel */}
             {deployType === "docker_stack" ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                <div>
-                  <label className="block text-xs font-semibold text-ink mb-1">Web Konsole Port</label>
-                  <input
-                    type="number"
-                    value={webPort}
-                    onChange={(e) => setWebPort(Number(e.target.value))}
-                    className="w-full text-xs font-mono px-3 py-2 rounded-xl border border-line bg-paper text-ink"
-                  />
-                  <p className="text-[10px] text-ink-soft mt-1">URL: http://localhost:{webPort}</p>
+              <div className="space-y-4 pt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-ink mb-1">Web Konsole Port</label>
+                    <input
+                      type="number"
+                      value={webPort}
+                      onChange={(e) => setWebPort(Number(e.target.value))}
+                      className="w-full text-xs font-mono px-3 py-2 rounded-xl border border-line bg-paper text-ink"
+                    />
+                    <p className="text-[10px] text-ink-soft mt-1">URL: http://localhost:{webPort}</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-ink mb-1">API Backend Port</label>
+                    <input
+                      type="number"
+                      value={apiPort}
+                      onChange={(e) => setApiPort(Number(e.target.value))}
+                      className="w-full text-xs font-mono px-3 py-2 rounded-xl border border-line bg-paper text-ink"
+                    />
+                    <p className="text-[10px] text-ink-soft mt-1">API: http://localhost:{apiPort}</p>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-ink mb-1">API Backend Port</label>
-                  <input
-                    type="number"
-                    value={apiPort}
-                    onChange={(e) => setApiPort(Number(e.target.value))}
-                    className="w-full text-xs font-mono px-3 py-2 rounded-xl border border-line bg-paper text-ink"
-                  />
-                  <p className="text-[10px] text-ink-soft mt-1">API: http://localhost:{apiPort}</p>
+
+                <div className="p-4 rounded-xl bg-paper/60 border border-line flex items-center justify-between gap-4">
+                  <span className="text-xs text-ink-soft font-mono">1-Line Installer für Remote-Terminal</span>
+                  <button
+                    type="button"
+                    onClick={handleFetchOneLineInstaller}
+                    className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1"
+                  >
+                    <IconTerminal2 size={13} /> Befehl generieren
+                  </button>
                 </div>
+
+                {oneLineScript && (
+                  <div className="bg-black/80 p-3 rounded-lg font-mono text-[11px] text-emerald-400 break-all select-all">
+                    {oneLineScript}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
@@ -385,15 +389,15 @@ export default function SinglePageCommandCenter() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-ink mb-1">Maschinentyp & Kosten</label>
+                  <label className="block text-xs font-semibold text-ink mb-1">Maschinentyp</label>
                   <select
                     value={machineType}
                     onChange={(e) => setMachineType(e.target.value)}
                     className="w-full text-xs font-mono px-3 py-2 rounded-xl border border-line bg-paper text-ink"
                   >
-                    <option value="e2-standard-4">e2-standard-4 (4 vCPU, 16 GB RAM) — 113,00 € / Mo</option>
-                    <option value="e2-standard-8">e2-standard-8 (8 vCPU, 32 GB RAM) — 225,00 € / Mo</option>
-                    <option value="e2-medium">e2-medium (2 vCPU, 4 GB RAM) — 32,00 € / Mo</option>
+                    <option value="e2-standard-4">e2-standard-4 (4 vCPU, 16 GB RAM)</option>
+                    <option value="e2-standard-8">e2-standard-8 (8 vCPU, 32 GB RAM)</option>
+                    <option value="e2-medium">e2-medium (2 vCPU, 4 GB RAM)</option>
                   </select>
                 </div>
               </div>
@@ -420,7 +424,7 @@ export default function SinglePageCommandCenter() {
         </div>
       )}
 
-      {/* SEKTION 2: Instanzen-Tabelle */}
+      {/* SEKTION 2: Flotten- & Instanzen-Tabelle */}
       <div className="bg-card border border-line rounded-2xl overflow-hidden shadow-sm">
         <div className="p-5 border-b border-line flex items-center justify-between">
           <h2 className="font-bold text-sm text-ink">Bereitgestellte Instanzen & Mandanten</h2>
@@ -453,182 +457,99 @@ export default function SinglePageCommandCenter() {
                 <tr className="border-b border-line bg-paper/50 text-ink-soft uppercase text-[10px] tracking-wider">
                   <th className="py-3 px-5">Status</th>
                   <th className="py-3 px-4">Mandant / Name</th>
-                  <th className="py-3 px-4">Bereitstellung</th>
-                  <th className="py-3 px-4">Hosting-Kosten / Mo</th>
+                  <th className="py-3 px-4">Bereitstellung & Hardware</th>
                   <th className="py-3 px-4">Endpunkt / URL</th>
                   <th className="py-3 px-4 text-center">Appliance Öffnen</th>
                   <th className="py-3 px-5 text-right">Aktionen</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line/60">
-                {instances.map((inst) => {
-                  const cost = getInstanceCost(inst);
-                  return (
-                    <tr key={inst.id} className="hover:bg-paper/30 transition-colors">
-                      <td className="py-4 px-5 whitespace-nowrap">
-                        {inst.status === "running" && (
-                          <span className="inline-flex items-center gap-1.5 text-emerald-500 font-bold font-mono">
-                            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                            RUNNING
-                          </span>
-                        )}
-                        {inst.status === "provisioning" && (
-                          <span className="inline-flex items-center gap-1.5 text-amber-500 font-bold font-mono">
-                            <span className="h-2 w-2 rounded-full bg-amber-500 animate-spin"></span>
-                            BOOTSTRAP...
-                          </span>
-                        )}
-                        {inst.status === "error" && (
-                          <span className="inline-flex items-center gap-1.5 text-danger font-bold font-mono">
-                            <span className="h-2 w-2 rounded-full bg-danger"></span>
-                            ERROR
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="py-4 px-4 font-medium text-ink">
-                        <div className="font-bold text-sm text-ink">{inst.name}</div>
-                        <div className="text-[11px] text-ink-soft font-mono">Mandant: {inst.tenant_id}</div>
-                      </td>
-
-                      <td className="py-4 px-4">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-paper border border-line">
-                          {inst.type === "gcp_vm" ? `🏢 GCP VM (${inst.machine_type || "e2-std-4"})` : "🐳 Lokal Docker"}
+                {instances.map((inst) => (
+                  <tr key={inst.id} className="hover:bg-paper/30 transition-colors">
+                    <td className="py-4 px-5 whitespace-nowrap">
+                      {inst.status === "running" && (
+                        <span className="inline-flex items-center gap-1.5 text-emerald-500 font-bold font-mono">
+                          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                          RUNNING
                         </span>
-                        {inst.type === "gcp_vm" && (
-                          <div className="text-[10px] text-ink-soft mt-0.5">{inst.zone || "Frankfurt"}</div>
-                        )}
-                      </td>
+                      )}
+                      {inst.status === "provisioning" && (
+                        <span className="inline-flex items-center gap-1.5 text-amber-500 font-bold font-mono">
+                          <span className="h-2 w-2 rounded-full bg-amber-500 animate-spin"></span>
+                          BOOTSTRAP...
+                        </span>
+                      )}
+                      {inst.status === "error" && (
+                        <span className="inline-flex items-center gap-1.5 text-danger font-bold font-mono">
+                          <span className="h-2 w-2 rounded-full bg-danger"></span>
+                          ERROR
+                        </span>
+                      )}
+                    </td>
 
-                      <td className="py-4 px-4 font-mono text-[11px]">
-                        {cost > 0 ? (
-                          <span className="text-amber-500 font-bold">{cost.toFixed(2)} € / Mo</span>
-                        ) : (
-                          <span className="text-emerald-500 font-bold">0,00 € (Lokal)</span>
-                        )}
-                      </td>
+                    <td className="py-4 px-4 font-medium text-ink">
+                      <div className="font-bold text-sm text-ink">{inst.name}</div>
+                      <div className="text-[11px] text-ink-soft font-mono">Mandant: {inst.tenant_id}</div>
+                    </td>
 
-                      <td className="py-4 px-4 font-mono text-[11px]">
-                        {inst.endpoint_url ? (
-                          <span className="text-ink">{inst.endpoint_url}</span>
-                        ) : (
-                          <span className="text-ink-soft italic">Wird zugewiesen...</span>
-                        )}
-                      </td>
+                    <td className="py-4 px-4">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-paper border border-line">
+                        {inst.type === "gcp_vm" ? `🏢 GCP VM (${inst.machine_type || "e2-std-4"})` : "🐳 Lokal Docker"}
+                      </span>
+                      {inst.type === "gcp_vm" && (
+                        <div className="text-[10px] text-ink-soft mt-0.5">{inst.zone || "Frankfurt"}</div>
+                      )}
+                    </td>
 
-                      <td className="py-4 px-4 text-center">
-                        {inst.endpoint_url ? (
-                          <a
-                            href={inst.endpoint_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 btn-primary text-xs py-1.5 px-3 rounded-lg shadow-sm"
-                          >
-                            <span>🚀 Öffnen</span>
-                            <IconExternalLink size={13} />
-                          </a>
-                        ) : (
-                          <span className="text-ink-soft text-[11px]">In Vorbereitung</span>
-                        )}
-                      </td>
+                    <td className="py-4 px-4 font-mono text-[11px]">
+                      {inst.endpoint_url ? (
+                        <span className="text-ink">{inst.endpoint_url}</span>
+                      ) : (
+                        <span className="text-ink-soft italic">Wird zugewiesen...</span>
+                      )}
+                    </td>
 
-                      <td className="py-4 px-5 text-right whitespace-nowrap space-x-2">
-                        <button
-                          type="button"
-                          onClick={() => openLogsModal(inst.id)}
-                          className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1"
-                          title="Logs ansehen"
+                    <td className="py-4 px-4 text-center">
+                      {inst.endpoint_url ? (
+                        <a
+                          href={inst.endpoint_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 btn-primary text-xs py-1.5 px-3 rounded-lg shadow-sm"
                         >
-                          <IconTerminal2 size={13} /> Logs
-                        </button>
+                          <span>🚀 Öffnen</span>
+                          <IconExternalLink size={13} />
+                        </a>
+                      ) : (
+                        <span className="text-ink-soft text-[11px]">In Vorbereitung</span>
+                      )}
+                    </td>
 
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(inst.id, inst.name)}
-                          className="text-danger hover:underline text-xs py-1.5 px-2 inline-flex items-center gap-1"
-                          title="Instanz löschen"
-                        >
-                          <IconTrash size={13} />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                    <td className="py-4 px-5 text-right whitespace-nowrap space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => openLogsModal(inst.id)}
+                        className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1"
+                        title="Logs ansehen"
+                      >
+                        <IconTerminal2 size={13} /> Logs
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(inst.id, inst.name)}
+                        className="text-danger hover:underline text-xs py-1.5 px-2 inline-flex items-center gap-1"
+                        title="Instanz löschen"
+                      >
+                        <IconTrash size={13} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         )}
-      </div>
-
-      {/* SEKTION 3: Infrastrukturkosten Übersicht */}
-      <div className="bg-card border border-line rounded-2xl p-6 shadow-sm space-y-6">
-        <div className="flex items-center gap-2 pb-3 border-b border-line">
-          <IconCalculator size={20} className="text-signal" />
-          <div>
-            <h2 className="font-bold text-sm text-ink">Infrastrukturkosten-Übersicht (Hosting-Preise)</h2>
-            <p className="text-xs text-ink-soft">
-              Reale Monatskosten der Bereitstellungsoptionen (GCP Frankfurt europe-west3 vs. Lokale Docker Stacks).
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {/* Card 0: Docker Local */}
-          <div className="bg-emerald-500/5 border border-emerald-500/30 rounded-2xl p-5 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold font-mono text-emerald-500 uppercase">🐳 Lokal Docker</span>
-              <span className="text-xs font-mono bg-paper px-2 py-0.5 rounded border border-emerald-500/40 text-emerald-500">Self-Hosted</span>
-            </div>
-            <div className="text-2xl font-black text-emerald-500 font-mono">0,00 € <span className="text-xs text-ink-soft font-sans font-normal">/ Mo</span></div>
-            <ul className="text-xs text-ink-soft space-y-1 font-mono text-[11px]">
-              <li>• Eigener Server / Bare-Metal</li>
-              <li>• Unbegrenzte Ressourcen</li>
-              <li>• Keine Cloud-Rechnung</li>
-            </ul>
-          </div>
-
-          {/* Card 1: e2-medium */}
-          <div className="bg-paper/50 border border-line rounded-2xl p-5 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold font-mono text-ink-soft uppercase">🏢 GCP Test</span>
-              <span className="text-xs font-mono bg-paper px-2 py-0.5 rounded border border-line">e2-medium</span>
-            </div>
-            <div className="text-2xl font-black text-ink font-mono">~ 32,00 € <span className="text-xs text-ink-soft font-sans font-normal">/ Mo</span></div>
-            <ul className="text-xs text-ink-soft space-y-1 font-mono text-[11px]">
-              <li>• 2 vCPUs (shared)</li>
-              <li>• 4 GB RAM · 30 GB Disk</li>
-              <li>• Für Test-Instanzen</li>
-            </ul>
-          </div>
-
-          {/* Card 2: e2-standard-4 */}
-          <div className="bg-signal/5 border border-signal/30 rounded-2xl p-5 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold font-mono text-signal uppercase">🏢 GCP Standard</span>
-              <span className="text-xs font-mono bg-paper px-2 py-0.5 rounded border border-signal/40 text-signal">e2-standard-4</span>
-            </div>
-            <div className="text-2xl font-black text-ink font-mono">~ 113,00 € <span className="text-xs text-ink-soft font-sans font-normal">/ Mo</span></div>
-            <ul className="text-xs text-ink-soft space-y-1 font-mono text-[11px]">
-              <li>• 4 vCPUs (dediziert)</li>
-              <li>• 16 GB RAM · 50 GB SSD</li>
-              <li>• Empfohlener Standard</li>
-            </ul>
-          </div>
-
-          {/* Card 3: e2-standard-8 */}
-          <div className="bg-paper/50 border border-line rounded-2xl p-5 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold font-mono text-ink-soft uppercase">🏢 GCP High Load</span>
-              <span className="text-xs font-mono bg-paper px-2 py-0.5 rounded border border-line">e2-standard-8</span>
-            </div>
-            <div className="text-2xl font-black text-ink font-mono">~ 225,00 € <span className="text-xs text-ink-soft font-sans font-normal">/ Mo</span></div>
-            <ul className="text-xs text-ink-soft space-y-1 font-mono text-[11px]">
-              <li>• 8 vCPUs (dediziert)</li>
-              <li>• 32 GB RAM · 100 GB SSD</li>
-              <li>• Für große Datenmengen</li>
-            </ul>
-          </div>
-        </div>
       </div>
 
       {/* Logs Modal */}

@@ -1,7 +1,8 @@
-"""docker_provisioner.py — Docker Appliance Stack Manager & One-Line Installer Generator.
+"""docker_provisioner.py — Autarker Docker-Stack Provisioner für die VIRKI Control Plane.
 
-Verwaltet das lokale oder Remote-Deployment von Docker Stacks aus virgi-platform-dist:main
-und generiert kundenindividuelle Onboarding-Installationsskripte.
+Klont das Kunden-Appliance Repository (virgi-platform-dist:main),
+erzeugt dynamische Docker Compose Spezifikationen und startet den Appliance-Stack
+lokal auf dem Zielserver oder der Control-Plane VM.
 """
 
 from __future__ import annotations
@@ -10,63 +11,81 @@ import logging
 import os
 import subprocess
 import threading
-import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Dict, Any
 
 from .db import append_log, update_instance_status
 
 log = logging.getLogger("docker_provisioner")
 
-DIST_REPO_URL = "https://github.com/NextChapterExperts/virgi-platform-dist.git"
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+if GITHUB_TOKEN:
+    DIST_REPO_URL = f"https://x-access-token:{GITHUB_TOKEN}@github.com/NextChapterExperts/virgi-platform-dist.git"
+else:
+    DIST_REPO_URL = "https://github.com/NextChapterExperts/virgi-platform-dist.git"
 
 
-def generate_docker_install_script(
+def generate_install_script(
     tenant_id: str,
     company_name: str,
     web_port: int = 8190,
     api_port: int = 8191,
 ) -> str:
-    """Generiert ein sofort ausführbares 1-Zeilen-Installationsskript für den Kunden."""
+    """Generiert ein 1-Zeilen Bash Auto-Install Script für den Kunden-Server."""
     return f"""#!/bin/bash
-# ==============================================================================
-# VIRKI AI-OS Core Appliance — Automated 1-Line Installer
-# Mandant: {tenant_id} ({company_name})
-# ==============================================================================
-
 set -e
 
-echo "🚀 Starte Installation der VIRKI AI-OS Core Platform für '{company_name}'..."
+echo "=== VIRKI AI-OS Appliance Setup (Mandant: {tenant_id}) ==="
 
-# 1. Docker & Git prüfen
-command -v docker >/dev/null 2>&1 || {{ echo "❌ Docker ist nicht installiert. Bitte installieren Sie Docker zuerst."; exit 1; }}
-command -v git >/dev/null 2>&1 || {{ echo "❌ Git ist nicht installiert. Bitte installieren Sie Git zuerst."; exit 1; }}
+if ! command -v docker &> /dev/null; then
+    echo "📦 Installiere Docker..."
+    curl -fsSL https://get.docker.com | sh
+    systemctl enable --now docker
+fi
 
-# 2. Verzeichnis anlegen
-INSTALL_DIR="$HOME/virki-appliance-{tenant_id}"
+INSTALL_DIR="$HOME/.virki_instances/{tenant_id}"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-# 3. Neuestes Core-Platform Release aus GitHub clonen
-echo "📦 Lade die neueste virgi-platform-dist Distribution herunter..."
-if [ -d "repo" ]; then
-    cd repo && git fetch && git checkout main && git pull origin main && cd ..
-else
+if [ ! -d "repo" ]; then
+    echo "📂 Klone VIRKI Appliance Repository..."
     git clone --branch main {DIST_REPO_URL} repo
+else
+    echo "🔄 Aktualisiere Repository..."
+    cd repo && git pull origin main && cd ..
 fi
 
-# 4. Umgebungskonfiguration schreiben
 cd repo/deploy/docker
 
-cat << 'EOF' > .env
-AIOS_TENANT_ID="{tenant_id}"
-AIOS_COMPANY_NAME="{company_name}"
-AIOS_WEB_PORT={web_port}
-AIOS_API_PORT={api_port}
-EOF
+cat << 'COMPOSEEOF' > docker-compose.yml
+services:
+  ai-os-core:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: virki-appliance-{tenant_id}:latest
+    container_name: virki-appliance-{tenant_id}
+    restart: unless-stopped
+    ports:
+      - "{web_port}:8090"
+      - "{api_port}:8091"
+    environment:
+      - NODE_ENV=production
+      - PORT=8090
+      - HOST=0.0.0.0
+      - ORCHESTRATOR_URL=http://127.0.0.1:8091
+      - DATA_DIR=/app/data
+      - AIOS_TENANT_ID={tenant_id}
+      - AIOS_COMPANY_NAME={company_name}
+    volumes:
+      - virki-data-{tenant_id}:/app/data
 
-# 5. Docker Stack starten
-echo "🐳 Baue und starte die VIRKI Core Appliance..."
+volumes:
+  virki-data-{tenant_id}:
+    name: virki-data-{tenant_id}
+COMPOSEEOF
+
+echo "🚀 Starte Docker Appliance Stack (Port Web: {web_port}, API: {api_port})..."
 docker compose up -d --build
 
 echo ""
@@ -76,6 +95,9 @@ echo "👉 Web-Konsole: http://localhost:{web_port}/"
 echo "👉 API-Backend: http://localhost:{api_port}/"
 echo "======================================================================"
 """
+
+
+generate_docker_install_script = generate_install_script
 
 
 def provision_local_docker_stack_async(
@@ -103,11 +125,16 @@ def _provision_local_docker_stack_worker(
 ) -> None:
     append_log(instance_id, f"🐳 Starte Bereitstellung des Docker-Stacks für '{company_name}' (Port {web_port}/{api_port})...")
     
-    target_dir = Path.home() / f".virki_instances" / tenant_id
-    target_dir.mkdir(parents=True, exist_ok=True)
+    # Nutze geteilten Pfad /tmp/virki_instances falls beschreibbar, sonst Fallback auf Home
+    try:
+        target_dir = Path("/tmp/virki_instances") / tenant_id
+        target_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        target_dir = Path.home() / ".virki_instances" / tenant_id
+        target_dir.mkdir(parents=True, exist_ok=True)
     
     try:
-        append_log(instance_id, f"📂 Klone {DIST_REPO_URL} (Branch: main)...")
+        append_log(instance_id, f"📂 Synchronisiere virgi-platform-dist (Branch: main)...")
         repo_dir = target_dir / "repo"
         if not (repo_dir / ".git").exists():
             subprocess.run(["git", "clone", "--branch", "main", DIST_REPO_URL, str(repo_dir)], check=True, capture_output=True, text=True)
@@ -119,9 +146,39 @@ def _provision_local_docker_stack_worker(
         append_log(instance_id, "✓ Repository erfolgreich synchronisiert.")
 
         docker_dir = repo_dir / "deploy" / "docker"
-        append_log(instance_id, "🔨 Baue Docker-Container Stack (Multi-Stage Node/Python Build)...")
+        append_log(instance_id, f"⚙️ Generiere Docker-Compose Konfiguration (Web: {web_port}, API: {api_port})...")
 
-        # Docker Compose up
+        # Dynamisches docker-compose.yml schreiben
+        compose_content = f"""services:
+  ai-os-core:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: virki-appliance-{tenant_id}:latest
+    container_name: virki-appliance-{tenant_id}
+    restart: unless-stopped
+    ports:
+      - "{web_port}:8090"
+      - "{api_port}:8091"
+    environment:
+      - NODE_ENV=production
+      - PORT=8090
+      - HOST=0.0.0.0
+      - ORCHESTRATOR_URL=http://127.0.0.1:8091
+      - DATA_DIR=/app/data
+      - AIOS_TENANT_ID={tenant_id}
+      - AIOS_COMPANY_NAME={company_name}
+    volumes:
+      - virki-data-{tenant_id}:/app/data
+
+volumes:
+  virki-data-{tenant_id}:
+    name: virki-data-{tenant_id}
+"""
+        (docker_dir / "docker-compose.yml").write_text(compose_content, encoding="utf-8")
+
+        append_log(instance_id, "🔨 Baue und starte Docker-Container Stack...")
+
         env = os.environ.copy()
         env["AIOS_TENANT_ID"] = tenant_id
         env["AIOS_COMPANY_NAME"] = company_name

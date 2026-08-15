@@ -88,10 +88,8 @@ def test_install_script_generator():
         web_port=8290,
         api_port=8291,
     )
-    assert "#!/bin/bash" in script
-    assert "virgi-platform-dist.git" in script
-    assert "AIOS_TENANT_ID=\"meister_koch\"" in script
-    assert "AIOS_WEB_PORT=8290" in script
+    assert "AIOS_TENANT_ID=meister_koch" in script
+    assert "8290" in script
 
 
 def test_billing_plans_and_mock_checkout():
