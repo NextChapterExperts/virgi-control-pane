@@ -472,16 +472,16 @@ export default function ControlPlaneCockpit() {
                     </td>
 
                     <td className="py-4 px-5 text-right whitespace-nowrap space-x-2">
-                      {/* Pause / Start Button */}
+                      {/* Pause / Start / Retry Buttons */}
                       {inst.status === "running" && (
                         <button
                           type="button"
                           disabled={actionLoadingId === inst.id}
                           onClick={() => handlePause(inst.id)}
-                          className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1 text-amber-500 hover:text-amber-600"
-                          title="Instanz pausieren"
+                          className="btn-secondary text-xs py-1.5 px-3 inline-flex items-center gap-1.5 font-bold text-amber-500 border-amber-500/30 hover:bg-amber-500/10 cursor-pointer"
+                          title="Instanz pausieren (stoppen)"
                         >
-                          <IconPlayerPause size={13} /> Pause
+                          <IconPlayerPause size={14} /> Pausieren
                         </button>
                       )}
 
@@ -490,17 +490,29 @@ export default function ControlPlaneCockpit() {
                           type="button"
                           disabled={actionLoadingId === inst.id}
                           onClick={() => handleStart(inst.id)}
-                          className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1 text-emerald-500 hover:text-emerald-600"
-                          title="Instanz starten"
+                          className="btn-secondary text-xs py-1.5 px-3 inline-flex items-center gap-1.5 font-bold text-emerald-500 border-emerald-500/30 hover:bg-emerald-500/10 cursor-pointer"
+                          title="Instanz starten (fortsetzen)"
                         >
-                          <IconPlayerPlay size={13} /> Start
+                          <IconPlayerPlay size={14} /> Fortsetzen
+                        </button>
+                      )}
+
+                      {inst.status === "error" && (
+                        <button
+                          type="button"
+                          disabled={actionLoadingId === inst.id}
+                          onClick={() => handleStart(inst.id)}
+                          className="btn-secondary text-xs py-1.5 px-3 inline-flex items-center gap-1.5 font-bold text-sky-500 border-sky-500/30 hover:bg-sky-500/10 cursor-pointer"
+                          title="Instanz neu starten"
+                        >
+                          <IconRefresh size={14} /> Neu starten
                         </button>
                       )}
 
                       <button
                         type="button"
                         onClick={() => openLogsModal(inst.id)}
-                        className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1"
+                        className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1 cursor-pointer"
                         title="Logs ansehen"
                       >
                         <IconTerminal2 size={13} /> Logs
@@ -510,7 +522,7 @@ export default function ControlPlaneCockpit() {
                         type="button"
                         disabled={actionLoadingId === inst.id}
                         onClick={() => handleDelete(inst.id, inst.name)}
-                        className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1 text-danger hover:bg-danger/10"
+                        className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1 text-danger hover:bg-danger/10 border-danger/20 cursor-pointer"
                         title="Instanz löschen"
                       >
                         <IconTrash size={13} /> Löschen
