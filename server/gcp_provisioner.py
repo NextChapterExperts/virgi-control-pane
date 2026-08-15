@@ -1,7 +1,8 @@
-"""gcp_provisioner.py — Google Cloud Platform VM Lifecycle Manager für die Control Plane.
+"""gcp_provisioner.py — Google Cloud Platform (VM & Cloud Run Container) Lifecycle Manager.
 
-Erstellt, startet, stoppt und löscht dedizierte Compute Engine VMs,
-die direkt aus dem Kunden-Appliance Repository (virgi-platform-dist:main) provisioniert werden.
+Verwaltet das automatisierte Erstellen, Starten und Löschen von:
+1. Google Cloud Compute Engine VMs (dedizierte Ubuntu VMs mit systemd Autostart)
+2. Google Cloud Run Serverless Contained Stacks (Cloud Container mit automatischer HTTPS URL)
 """
 
 from __future__ import annotations
@@ -23,7 +24,9 @@ log = logging.getLogger("gcp_provisioner")
 GCLOUD_BIN = os.environ.get("GCLOUD_BIN", "/home/peter/.local/share/google-cloud-sdk/bin/gcloud")
 DEFAULT_PROJECT = os.environ.get("GCP_PROJECT", "strong-zephyr-505611-k4")
 DEFAULT_ZONE = os.environ.get("GCP_ZONE", "europe-west3-a")
+DEFAULT_REGION = os.environ.get("GCP_REGION", "europe-west3")
 DEFAULT_MACHINE_TYPE = os.environ.get("GCP_MACHINE_TYPE", "e2-standard-4")
+
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 if GITHUB_TOKEN:
     DIST_REPO_URL = f"https://x-access-token:{GITHUB_TOKEN}@github.com/NextChapterExperts/virgi-platform-dist.git"
@@ -52,6 +55,10 @@ def _run_gcloud(args: List[str]) -> Any:
     except Exception:
         return output
 
+
+# -----------------------------------------------------------------------------
+# 1. Google Cloud Compute Engine VM Provisioning
+# -----------------------------------------------------------------------------
 
 def provision_gcp_vm_async(
     instance_id: str,
@@ -86,7 +93,6 @@ def _provision_gcp_vm_worker(
     append_log(instance_id, f"🚀 Starte GCP Compute VM Provisionierung für Mandant '{tenant_id}' ({company_name})...")
     append_log(instance_id, f"📍 Zone: {zone} · Maschinentyp: {machine_type} · Projekt: {project}")
 
-    # Startup-Script: Klont virgi-platform-dist:main, richtet systemd Autostart ein und startet Docker-Stack
     startup_script = f"""#!/bin/bash
 set -e
 exec > >(tee -a /var/log/virki-startup.log) 2>&1
@@ -107,7 +113,6 @@ AIOS_COMPANY_NAME="{company_name}"
 AIOS_ADMIN_EMAIL="{admin_email}"
 ENVEOF
 
-# Systemd Autostart-Service für jeden VM-Start / Reboot einrichten
 cat << 'SERVICE_EOF' > /etc/systemd/system/virki-appliance.service
 [Unit]
 Description=VIRKI AI-OS Core Appliance Docker Stack
@@ -134,7 +139,6 @@ echo "=== VIRKI Appliance erfolgreich gestartet und Autostart registriert (Port 
 """
 
     try:
-        # 1. VM anlegen
         append_log(instance_id, f"📦 Erstelle Compute Engine Instanz '{vm_name}'...")
         cmd_create = [
             "compute", "instances", "create", vm_name,
@@ -153,7 +157,6 @@ echo "=== VIRKI Appliance erfolgreich gestartet und Autostart registriert (Port 
         _run_gcloud(cmd_create)
         append_log(instance_id, "✓ VM-Instanz erfolgreich in Google Cloud angelegt.")
 
-        # 2. Öffentliche IP abfragen
         time.sleep(3)
         append_log(instance_id, "🔍 Ermittle öffentliche IP-Adresse...")
         info = _run_gcloud(["compute", "instances", "describe", vm_name, f"--project={project}", f"--zone={zone}", "--format=json"])
@@ -188,3 +191,102 @@ def stop_gcp_vm(vm_name: str, zone: str = DEFAULT_ZONE, project: str = DEFAULT_P
 
 def delete_gcp_vm(vm_name: str, zone: str = DEFAULT_ZONE, project: str = DEFAULT_PROJECT) -> None:
     _run_gcloud(["compute", "instances", "delete", vm_name, f"--zone={zone}", f"--project={project}", "--quiet"])
+
+
+# -----------------------------------------------------------------------------
+# 2. Google Cloud Run (Serverless Container Stack) Provisioning
+# -----------------------------------------------------------------------------
+
+def provision_gcp_cloud_run_async(
+    instance_id: str,
+    tenant_id: str,
+    company_name: str,
+    region: str = DEFAULT_REGION,
+    project: str = DEFAULT_PROJECT,
+) -> None:
+    """Führt das Google Cloud Run Container Deployment asynchron aus."""
+    thread = threading.Thread(
+        target=_provision_gcp_cloud_run_worker,
+        args=(instance_id, tenant_id, company_name, region, project),
+        daemon=True,
+    )
+    thread.start()
+
+
+def _provision_gcp_cloud_run_worker(
+    instance_id: str,
+    tenant_id: str,
+    company_name: str,
+    region: str,
+    project: str,
+) -> None:
+    sanitized = re.sub(r"[^a-z0-9\-]", "", tenant_id.lower().replace("_", "-"))
+    service_name = f"virki-{sanitized}"
+    instance_dir = Path("/tmp/virki_instances") / tenant_id
+    repo_dir = instance_dir / "repo"
+
+    append_log(instance_id, f"☁️ Starte Google Cloud Run Container Bereitstellung für Mandant '{tenant_id}' ({company_name})...")
+    append_log(instance_id, f"📍 Region: {region} · Projekt: {project} · Service: {service_name}")
+
+    try:
+        # 1. Repository klonen / synchronisieren
+        instance_dir.mkdir(parents=True, exist_ok=True)
+        if not (repo_dir / ".git").exists():
+            append_log(instance_id, "📥 Klone virgi-platform-dist Repository...")
+            subprocess.run(
+                ["git", "clone", "--branch", "main", DIST_REPO_URL, str(repo_dir)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        else:
+            append_log(instance_id, "🔄 Aktualisiere virgi-platform-dist...")
+            subprocess.run(
+                ["git", "-C", str(repo_dir), "pull", "origin", "main"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+        # 2. Cloud Run Build & Deploy
+        append_log(instance_id, f"🏗️ Erstelle und deploye Container Service '{service_name}' auf Cloud Run...")
+        cmd_deploy = [
+            "run", "deploy", service_name,
+            f"--source={repo_dir}",
+            f"--project={project}",
+            f"--region={region}",
+            "--allow-unauthenticated",
+            "--port=8090",
+            "--memory=2Gi",
+            "--cpu=2",
+            f"--set-env-vars=AIOS_TENANT_ID={tenant_id},AIOS_COMPANY_NAME={company_name}",
+            "--format=json",
+        ]
+        deploy_res = _run_gcloud(cmd_deploy)
+        
+        # 3. URL ermitteln
+        service_url = None
+        if isinstance(deploy_res, dict):
+            status = deploy_res.get("status", {})
+            service_url = status.get("url")
+        
+        if not service_url:
+            info = _run_gcloud(["run", "services", "describe", service_name, f"--project={project}", f"--region={region}", "--format=json"])
+            if isinstance(info, dict):
+                service_url = info.get("status", {}).get("url")
+
+        if service_url:
+            append_log(instance_id, f"🎉 Cloud Run Container erfolgreich online: {service_url}")
+            update_instance_status(instance_id, "running", endpoint_url=service_url, backend_url=f"{service_url}/api")
+        else:
+            append_log(instance_id, "✓ Service gestartet (URL wird synchronisiert).")
+            update_instance_status(instance_id, "running")
+
+    except Exception as exc:
+        err_msg = str(exc)
+        append_log(instance_id, f"❌ Fehler beim Cloud Run Container Deployment: {err_msg}", level="ERROR")
+        update_instance_status(instance_id, "error")
+
+
+def delete_gcp_cloud_run(service_name: str, region: str = DEFAULT_REGION, project: str = DEFAULT_PROJECT) -> None:
+    _run_gcloud(["run", "services", "delete", service_name, f"--region={region}", f"--project={project}", "--quiet"])

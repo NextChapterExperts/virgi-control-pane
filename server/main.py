@@ -35,6 +35,8 @@ from .docker_provisioner import (
 from .gcp_provisioner import (
     provision_gcp_vm_async,
     delete_gcp_vm,
+    provision_gcp_cloud_run_async,
+    delete_gcp_cloud_run,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -68,10 +70,11 @@ def on_startup():
 class ProvisionRequest(BaseModel):
     tenant_id: str = Field(..., description="Eindeutige Mandanten-ID, z.B. schulze-bedachungen")
     company_name: str = Field(..., description="Firmenname für das Unternehmensprofil")
-    type: Literal["docker_stack", "gcp_vm"] = Field(
-        "docker_stack", description="Bereitstellungsziel: docker_stack oder gcp_vm"
+    type: Literal["docker_stack", "gcp_cloud_run", "gcp_vm"] = Field(
+        "docker_stack", description="Bereitstellungsziel: docker_stack, gcp_cloud_run oder gcp_vm"
     )
     zone: Optional[str] = Field("europe-west3-a", description="GCP-Zone für Cloud-VMs")
+    region: Optional[str] = Field("europe-west3", description="GCP-Region für Cloud Run Container")
     machine_type: Optional[str] = Field("e2-standard-4", description="GCP-Maschinentyp")
     web_port: Optional[int] = Field(8190, description="Web-Port bei lokalem Docker-Stack")
     api_port: Optional[int] = Field(8191, description="API-Port bei lokalem Docker-Stack")
@@ -148,6 +151,25 @@ def api_provision_instance(req: ProvisionRequest):
         )
         return {"status": "ok", "message": "GCP VM Provisionierung gestartet", "instance": inst}
 
+    elif req.type == "gcp_cloud_run":
+        # Initialisiere DB-Eintrag für Cloud Run Container
+        inst = create_instance(
+            instance_id=instance_id,
+            tenant_id=clean_tenant,
+            name=f"VIRKI Cloud Container ({req.company_name})",
+            instance_type="gcp_cloud_run",
+            endpoint_url="",
+            backend_url="",
+            zone=req.region or "europe-west3",
+        )
+        provision_gcp_cloud_run_async(
+            instance_id=instance_id,
+            tenant_id=clean_tenant,
+            company_name=req.company_name,
+            region=req.region or "europe-west3",
+        )
+        return {"status": "ok", "message": "Google Cloud Run Container Bereitstellung gestartet", "instance": inst}
+
     else:
         # Lokaler Docker Stack mit Port-Kollisionsschutz
         start_web = req.web_port or 8190
@@ -181,12 +203,17 @@ def api_delete_instance(instance_id: str):
     if not inst:
         raise HTTPException(status_code=404, detail="Instanz nicht gefunden")
     
-    # Falls es eine GCP VM ist, optional VM über gcloud löschen
+    # GCP Ressourcen aufräumen
     if inst["type"] == "gcp_vm":
         try:
             delete_gcp_vm(f"virki-{inst['tenant_id']}", zone=inst.get("zone") or "europe-west3-a")
         except Exception as exc:
             log.warning("GCP VM konnte nicht gelöscht werden: %s", exc)
+    elif inst["type"] == "gcp_cloud_run":
+        try:
+            delete_gcp_cloud_run(f"virki-{inst['tenant_id']}", region=inst.get("zone") or "europe-west3")
+        except Exception as exc:
+            log.warning("Cloud Run Service konnte nicht gelöscht werden: %s", exc)
 
     deleted = delete_instance(instance_id)
     return {"status": "ok", "deleted": deleted}

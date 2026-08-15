@@ -54,6 +54,22 @@ def test_api_instance_provision_and_list():
     assert any("schulze-gmbh" in item["tenant_id"] for item in items)
 
 
+def test_api_gcp_cloud_run_provision():
+    payload = {
+        "tenant_id": "cloud_kunde",
+        "company_name": "Cloud Kunde GmbH",
+        "type": "gcp_cloud_run",
+        "region": "europe-west3",
+    }
+    res = client.post("/v1/instances/provision", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    inst = data["instance"]
+    assert inst["type"] == "gcp_cloud_run"
+    assert "cloud-kunde" in inst["tenant_id"]
+
+
 def test_install_script_generator():
     script = generate_docker_install_script(
         tenant_id="meister_koch",

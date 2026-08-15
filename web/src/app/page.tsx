@@ -11,6 +11,7 @@ import {
   IconPlus,
   IconShieldLock,
   IconBolt,
+  IconCloud,
   IconChevronUp,
 } from "@tabler/icons-react";
 
@@ -18,7 +19,7 @@ interface Instance {
   id: string;
   tenant_id: string;
   name: string;
-  type: "gcp_vm" | "docker_stack";
+  type: "gcp_vm" | "gcp_cloud_run" | "docker_stack";
   status: "provisioning" | "running" | "stopped" | "error";
   endpoint_url: string;
   backend_url: string;
@@ -39,7 +40,7 @@ export default function ControlPlaneCockpit() {
   // Form states
   const [showForm, setShowForm] = useState(false);
   const [companyName, setCompanyName] = useState("");
-  const [deployType, setDeployType] = useState<"docker_stack" | "gcp_vm">("docker_stack");
+  const [deployType, setDeployType] = useState<"docker_stack" | "gcp_cloud_run" | "gcp_vm">("docker_stack");
   const [provisioning, setProvisioning] = useState(false);
 
   useEffect(() => {
@@ -76,6 +77,7 @@ export default function ControlPlaneCockpit() {
         tenant_id: tenantId || "mandant",
         company_name: companyName.trim(),
         type: deployType,
+        region: "europe-west3",
         zone: "europe-west3-a",
         machine_type: "e2-standard-4",
       };
@@ -127,7 +129,8 @@ export default function ControlPlaneCockpit() {
   // Metriken
   const activeCount = instances.filter((i) => i.status === "running").length;
   const dockerCount = instances.filter((i) => i.type === "docker_stack").length;
-  const gcpCount = instances.filter((i) => i.type === "gcp_vm").length;
+  const gcpRunCount = instances.filter((i) => i.type === "gcp_cloud_run").length;
+  const gcpVmCount = instances.filter((i) => i.type === "gcp_vm").length;
 
   return (
     <div className="space-y-8">
@@ -140,7 +143,7 @@ export default function ControlPlaneCockpit() {
               VIRKI Control Plane
             </h1>
             <p className="text-xs sm:text-sm text-ink-soft mt-1">
-              Betreiber-Leitstand: Kunden-Appliances lokal oder in Google Cloud bereitstellen und verwalten.
+              Betreiber-Cockpit: Appliances lokal, als Google Cloud Container oder als Dedicated VM bereitstellen.
             </p>
           </div>
 
@@ -163,8 +166,8 @@ export default function ControlPlaneCockpit() {
           </div>
         </div>
 
-        {/* 3 Schlanke Metrik-Karten */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* 4 Schlanke Metrik-Karten */}
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
           <div className="bg-card border border-line p-5 rounded-2xl">
             <span className="text-xs text-ink-soft uppercase font-bold tracking-wider">Laufende Instanzen</span>
             <div className="text-2xl sm:text-3xl font-black text-emerald-500 mt-2 font-mono flex items-baseline gap-2">
@@ -184,16 +187,25 @@ export default function ControlPlaneCockpit() {
 
           <div className="bg-card border border-line p-5 rounded-2xl">
             <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1.5">
+              <IconCloud size={14} className="text-sky-500" /> GCP Cloud Run Container
+            </span>
+            <div className="text-2xl sm:text-3xl font-black text-ink mt-2 font-mono">
+              {gcpRunCount}
+            </div>
+          </div>
+
+          <div className="bg-card border border-line p-5 rounded-2xl">
+            <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1.5">
               <IconBolt size={14} className="text-signal" /> Google Cloud VMs
             </span>
             <div className="text-2xl sm:text-3xl font-black text-ink mt-2 font-mono">
-              {gcpCount}
+              {gcpVmCount}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Bereitstellungs-Wizard (Kompakt & Einfach) */}
+      {/* Bereitstellungs-Wizard mit 3 Optionen */}
       {showForm && (
         <div className="bg-card border-2 border-signal/40 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6 animate-fade-in">
           <div className="flex items-center justify-between border-b border-line pb-4">
@@ -202,7 +214,7 @@ export default function ControlPlaneCockpit() {
                 <IconPlus size={20} className="text-signal" /> Neue VIRKI AI-OS Appliance bereitstellen
               </h2>
               <p className="text-xs text-ink-soft mt-0.5">
-                Geben Sie den Kundennamen ein und wählen Sie das Bereitstellungsziel.
+                Geben Sie den Kundennamen ein und wählen Sie das gewünschte Bereitstellungsziel.
               </p>
             </div>
             <button
@@ -230,12 +242,12 @@ export default function ControlPlaneCockpit() {
               />
             </div>
 
-            {/* Ziel-Auswahl */}
+            {/* 3 Bereitstellungsziele */}
             <div>
               <label className="block text-xs font-bold text-ink-soft uppercase tracking-wider mb-2">
                 Bereitstellungsziel
               </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <button
                   type="button"
                   onClick={() => setDeployType("docker_stack")}
@@ -246,13 +258,33 @@ export default function ControlPlaneCockpit() {
                   }`}
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-bold text-amber-500 flex items-center gap-2">
-                      <IconShieldLock size={18} /> 🐳 Lokaler Docker Stack
+                    <span className="text-sm font-bold text-amber-500 flex items-center gap-1.5">
+                      <IconShieldLock size={16} /> 🐳 Lokaler Docker
                     </span>
-                    {deployType === "docker_stack" && <IconCheck size={18} className="text-amber-500" />}
+                    {deployType === "docker_stack" && <IconCheck size={16} className="text-amber-500" />}
                   </div>
                   <p className="text-xs text-ink-soft leading-relaxed">
-                    Startet sofort als isolierter Container-Stack auf diesem Server. Schnellste Bereitstellung.
+                    Startet direkt auf diesem Server als isolierter Docker-Stack (0 € Cloud-Kosten).
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDeployType("gcp_cloud_run")}
+                  className={`p-5 rounded-2xl border text-left transition-all cursor-pointer ${
+                    deployType === "gcp_cloud_run"
+                      ? "bg-sky-500/10 border-sky-500 ring-2 ring-sky-500/20"
+                      : "bg-paper/40 border-line hover:border-line-strong opacity-80"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-bold text-sky-500 flex items-center gap-1.5">
+                      <IconCloud size={16} /> ☁️ GCP Cloud Run
+                    </span>
+                    {deployType === "gcp_cloud_run" && <IconCheck size={16} className="text-sky-500" />}
+                  </div>
+                  <p className="text-xs text-ink-soft leading-relaxed">
+                    Serverless Docker Container in Frankfurt (europe-west3) mit automatischer HTTPS-Domain.
                   </p>
                 </button>
 
@@ -266,13 +298,13 @@ export default function ControlPlaneCockpit() {
                   }`}
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-bold text-signal flex items-center gap-2">
-                      <IconBolt size={18} /> 🏢 Google Cloud VM (Frankfurt)
+                    <span className="text-sm font-bold text-signal flex items-center gap-1.5">
+                      <IconBolt size={16} /> 🏢 Dedicated GCP VM
                     </span>
-                    {deployType === "gcp_vm" && <IconCheck size={18} className="text-signal" />}
+                    {deployType === "gcp_vm" && <IconCheck size={16} className="text-signal" />}
                   </div>
                   <p className="text-xs text-ink-soft leading-relaxed">
-                    Startet eine dedizierte Compute Engine VM in Frankfurt mit eigener IP und Systemd-Autostart.
+                    Dedizierte Compute Engine VM mit eigener Public IP und Systemd-Autostart.
                   </p>
                 </button>
               </div>
@@ -315,7 +347,7 @@ export default function ControlPlaneCockpit() {
             <div className="text-3xl">🚀</div>
             <h3 className="font-bold text-base text-ink">Noch keine Appliances gestartet</h3>
             <p className="text-xs text-ink-soft max-w-md mx-auto">
-              Starten Sie einen lokalen Docker Stack oder eine Google Cloud VM mit einem Klick.
+              Starten Sie einen lokalen Docker Stack, einen Google Cloud Run Container oder eine Dedicated VM.
             </p>
             <button
               type="button"
@@ -369,7 +401,9 @@ export default function ControlPlaneCockpit() {
 
                     <td className="py-4 px-4">
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-mono bg-paper border border-line">
-                        {inst.type === "gcp_vm" ? "🏢 Google Cloud VM" : "🐳 Lokaler Docker Stack"}
+                        {inst.type === "gcp_vm" && "🏢 Dedicated GCP VM"}
+                        {inst.type === "gcp_cloud_run" && "☁️ GCP Cloud Run"}
+                        {inst.type === "docker_stack" && "🐳 Lokaler Docker"}
                       </span>
                     </td>
 
