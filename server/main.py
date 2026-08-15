@@ -18,7 +18,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse, Response
+import httpx
 from pydantic import BaseModel, Field
 
 from .db import (
@@ -326,21 +327,49 @@ async def api_stream_logs(instance_id: str):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-# -----------------------------------------------------------------------------
-# Endpunkt: Auto-Installer Generator
-# -----------------------------------------------------------------------------
-
-@app.get("/v1/install/{tenant_id}.sh", response_class=PlainTextResponse)
-def api_get_install_script(
-    tenant_id: str,
-    company: str = "Kunde",
-    web_port: int = 8190,
-    api_port: int = 8191,
-):
-    script = generate_docker_install_script(
-        tenant_id=tenant_id,
-        company_name=company,
-        web_port=web_port,
-        api_port=api_port,
-    )
-    return PlainTextResponse(content=script, media_type="text/plain")
+@app.api_route("/v1/instances/{instance_id}/proxy", methods=["GET", "POST", "HEAD"])
+@app.api_route("/v1/instances/{instance_id}/proxy/{path:path}", methods=["GET", "POST", "HEAD"])
+async def api_proxy_instance(instance_id: str, request: Request, path: str = ""):
+    """Authentifizierter Reverse-Proxy für Cloud Run Appliances."""
+    inst = get_instance(instance_id)
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instanz nicht gefunden")
+    
+    target_base = (inst.get("endpoint_url") or "").rstrip("/")
+    if not target_base:
+        raise HTTPException(status_code=400, detail="Keine Endpunkt-URL für diese Instanz vorhanden")
+        
+    target_url = f"{target_base}/{path}" if path else target_base
+    if request.url.query:
+        target_url += f"?{request.url.query}"
+    
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in ["host", "content-length"]}
+    
+    # Für Cloud Run: Google Identity Token einfügen
+    if inst.get("type") == "gcp_cloud_run":
+        try:
+            token_res = subprocess.run(
+                ["/opt/google-cloud-sdk/bin/gcloud", "auth", "print-identity-token"],
+                capture_output=True, text=True, timeout=5
+            )
+            if token_res.returncode == 0 and token_res.stdout.strip():
+                headers["Authorization"] = f"Bearer {token_res.stdout.strip()}"
+        except Exception as e:
+            log.warning("Konnte Identity Token für Proxy nicht erstellen: %s", e)
+            
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        try:
+            resp = await client.request(
+                method=request.method,
+                url=target_url,
+                headers=headers,
+                timeout=30.0,
+            )
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                headers={k: v for k, v in resp.headers.items() if k.lower() not in ["content-encoding", "content-length", "transfer-encoding"]},
+                media_type=resp.headers.get("content-type"),
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Proxy-Fehler beim Verbinden mit Appliance: {exc}")

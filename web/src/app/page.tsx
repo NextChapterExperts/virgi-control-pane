@@ -645,7 +645,7 @@ export default function ControlPlaneCockpit() {
                       <td className="py-4 px-4 text-center">
                         {inst.status === "running" && inst.endpoint_url ? (
                           <a
-                            href={inst.endpoint_url}
+                            href={inst.type === "gcp_cloud_run" ? `${API_BASE}/v1/instances/${inst.id}/proxy` : inst.endpoint_url}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1.5 btn-primary text-xs py-1.5 px-3 rounded-lg shadow-sm"
