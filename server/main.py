@@ -86,6 +86,26 @@ def api_get_instance(instance_id: str):
     return {"status": "ok", "instance": inst}
 
 
+import socket
+
+
+def _is_port_in_use(port: int) -> bool:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            return s.connect_ex(('127.0.0.1', port)) == 0
+    except Exception:
+        return False
+
+
+def _find_free_ports(web_port: int, api_port: int) -> tuple[int, int]:
+    w, a = web_port, api_port
+    while _is_port_in_use(w) or _is_port_in_use(a):
+        w += 2
+        a += 2
+    return w, a
+
+
 @app.post("/v1/instances/provision")
 def api_provision_instance(req: ProvisionRequest):
     instance_id = f"inst_{req.tenant_id}_{uuid.uuid4().hex[:6]}"
@@ -116,8 +136,9 @@ def api_provision_instance(req: ProvisionRequest):
 
     else:
         # Lokaler oder gemanagter Docker Stack
-        endpoint_url = f"http://localhost:{req.web_port}"
-        backend_url = f"http://localhost:{req.api_port}"
+        web_port, api_port = _find_free_ports(req.web_port, req.api_port)
+        endpoint_url = f"http://localhost:{web_port}"
+        backend_url = f"http://localhost:{api_port}"
         inst = create_instance(
             instance_id=instance_id,
             tenant_id=req.tenant_id,
@@ -131,8 +152,8 @@ def api_provision_instance(req: ProvisionRequest):
             instance_id=instance_id,
             tenant_id=req.tenant_id,
             company_name=req.company_name,
-            web_port=req.web_port,
-            api_port=req.api_port,
+            web_port=web_port,
+            api_port=api_port,
         )
         return {"status": "ok", "message": "Docker Stack Bereitstellung gestartet", "instance": inst}
 
