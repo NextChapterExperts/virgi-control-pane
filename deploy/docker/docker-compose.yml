@@ -12,11 +12,15 @@ services:
     environment:
       - GCP_PROJECT=${GCP_PROJECT:-strong-zephyr-505611-k4}
       - GCP_ZONE=${GCP_ZONE:-europe-west3-a}
+      - GCP_REGION=${GCP_REGION:-europe-west3}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - PATH=/opt/google-cloud-sdk/bin:/usr/local/bin:/usr/bin:/bin
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - control-plane-data:/app/data
       - /tmp/virki_instances:/tmp/virki_instances
+      - /home/peter/.config/gcloud:/root/.config/gcloud
+      - /home/peter/.local/share/google-cloud-sdk:/opt/google-cloud-sdk:ro
     networks:
       - virki-net
 

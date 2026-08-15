@@ -19,13 +19,35 @@ from typing import Any, Dict, List, Optional
 
 from .db import append_log, update_instance_status
 
+import shutil
+
 log = logging.getLogger("gcp_provisioner")
 
-GCLOUD_BIN = os.environ.get("GCLOUD_BIN", "/home/peter/.local/share/google-cloud-sdk/bin/gcloud")
 DEFAULT_PROJECT = os.environ.get("GCP_PROJECT", "strong-zephyr-505611-k4")
 DEFAULT_ZONE = os.environ.get("GCP_ZONE", "europe-west3-a")
 DEFAULT_REGION = os.environ.get("GCP_REGION", "europe-west3")
 DEFAULT_MACHINE_TYPE = os.environ.get("GCP_MACHINE_TYPE", "e2-standard-4")
+
+
+def _find_gcloud_bin() -> str:
+    env_bin = os.environ.get("GCLOUD_BIN", "").strip()
+    if env_bin and os.path.exists(env_bin):
+        return env_bin
+    
+    which_bin = shutil.which("gcloud")
+    if which_bin:
+        return which_bin
+        
+    for p in [
+        "/usr/bin/gcloud",
+        "/usr/local/bin/gcloud",
+        "/home/peter/.local/share/google-cloud-sdk/bin/gcloud",
+        "/root/google-cloud-sdk/bin/gcloud",
+    ]:
+        if os.path.exists(p):
+            return p
+            
+    return "gcloud"
 
 
 def _get_dist_repo_url() -> str:
@@ -50,11 +72,12 @@ def _get_dist_repo_url() -> str:
 
 
 def _run_gcloud(args: List[str]) -> Any:
+    gcloud_bin = _find_gcloud_bin()
     env = os.environ.copy()
-    sdk_bin_dir = Path(GCLOUD_BIN).parent
+    sdk_bin_dir = Path(gcloud_bin).parent
     env["PATH"] = f"{sdk_bin_dir}:{env.get('PATH', '')}"
 
-    cmd = [GCLOUD_BIN] + args
+    cmd = [gcloud_bin] + args
     log.info("Running gcloud command: %s", " ".join(cmd))
     res = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if res.returncode != 0:
