@@ -16,6 +16,7 @@ import {
   IconPlayerPause,
   IconPlayerPlay,
   IconCopy,
+  IconCoin,
 } from "@tabler/icons-react";
 
 interface Instance {
@@ -239,11 +240,41 @@ export default function ControlPlaneCockpit() {
     setTimeout(() => setCopied(false), 2500);
   };
 
-  // Metriken
+  // Kosten-Berechnung (GCP vs. On-Premise)
+  const calculateCost = (inst: Instance) => {
+    if (inst.type === "docker_stack") {
+      return { monthly: "0,00 €", hourly: "0,00 €", detail: "On-Prem / Lokal" };
+    }
+    if (inst.type === "gcp_cloud_run") {
+      if (inst.status === "stopped") {
+        return { monthly: "0,00 €", hourly: "0,00 €", detail: "Serverless (Pausiert)" };
+      }
+      return { monthly: "~ 15–35 €", hourly: "~ 0,02 €", detail: "Serverless (Pay-as-you-go)" };
+    }
+    if (inst.type === "gcp_vm") {
+      if (inst.status === "stopped") {
+        return { monthly: "~ 4,50 €", hourly: "~ 0,006 €", detail: "Nur Disk (VM gestoppt)" };
+      }
+      return { monthly: "~ 112,50 €", hourly: "~ 0,154 €", detail: "e2-std-4 (24/7 Compute)" };
+    }
+    return { monthly: "0,00 €", hourly: "0,00 €", detail: "Unbekannt" };
+  };
+
+  // Metriken & Aggregierte Kosten
   const activeCount = instances.filter((i) => i.status === "running").length;
   const dockerCount = instances.filter((i) => i.type === "docker_stack").length;
   const gcpRunCount = instances.filter((i) => i.type === "gcp_cloud_run").length;
   const gcpVmCount = instances.filter((i) => i.type === "gcp_vm").length;
+
+  const totalMonthlyCloudCost = instances.reduce((sum, inst) => {
+    if (inst.type === "gcp_vm") {
+      return sum + (inst.status === "stopped" ? 4.50 : 112.50);
+    }
+    if (inst.type === "gcp_cloud_run") {
+      return sum + (inst.status === "stopped" ? 0 : 25.00);
+    }
+    return sum;
+  }, 0);
 
   return (
     <div className="space-y-8 pb-32">
@@ -256,7 +287,7 @@ export default function ControlPlaneCockpit() {
               VIRKI Control Plane
             </h1>
             <p className="text-xs sm:text-sm text-ink-soft mt-1">
-              Betreiber-Cockpit: Appliances lokal, als Google Cloud Container oder als Dedicated VM bereitstellen.
+              Betreiber-Cockpit: Appliances lokal, als Google Cloud Container oder als Dedicated VM bereitstellen und Kosten überwachen.
             </p>
           </div>
 
@@ -279,8 +310,8 @@ export default function ControlPlaneCockpit() {
           </div>
         </div>
 
-        {/* 4 Schlanke Metrik-Karten */}
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        {/* 5 Schlanke Metrik-Karten inkl. GCP Kosten */}
+        <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
           <div className="bg-card border border-line p-5 rounded-2xl">
             <span className="text-xs text-ink-soft uppercase font-bold tracking-wider">Laufende Instanzen</span>
             <div className="text-2xl sm:text-3xl font-black text-emerald-500 mt-2 font-mono flex items-baseline gap-2">
@@ -291,34 +322,47 @@ export default function ControlPlaneCockpit() {
 
           <div className="bg-card border border-line p-5 rounded-2xl">
             <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1.5">
-              <IconShieldLock size={14} className="text-amber-500" /> Lokale Docker Stacks
+              <IconShieldLock size={14} className="text-amber-500" /> Lokale Docker
             </span>
-            <div className="text-2xl sm:text-3xl font-black text-ink mt-2 font-mono">
-              {dockerCount}
+            <div className="text-2xl sm:text-3xl font-black text-ink mt-2 font-mono flex items-baseline gap-2">
+              <span>{dockerCount}</span>
+              <span className="text-[11px] text-emerald-500 font-bold">0 € Cloud</span>
             </div>
           </div>
 
           <div className="bg-card border border-line p-5 rounded-2xl">
             <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1.5">
-              <IconCloud size={14} className="text-sky-500" /> GCP Cloud Run Container
+              <IconCloud size={14} className="text-sky-500" /> Cloud Run
             </span>
-            <div className="text-2xl sm:text-3xl font-black text-ink mt-2 font-mono">
-              {gcpRunCount}
+            <div className="text-2xl sm:text-3xl font-black text-ink mt-2 font-mono flex items-baseline gap-2">
+              <span>{gcpRunCount}</span>
+              <span className="text-[11px] text-sky-400 font-normal">Serverless</span>
             </div>
           </div>
 
           <div className="bg-card border border-line p-5 rounded-2xl">
             <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1.5">
-              <IconBolt size={14} className="text-signal" /> Google Cloud VMs
+              <IconBolt size={14} className="text-signal" /> Dedicated VMs
             </span>
-            <div className="text-2xl sm:text-3xl font-black text-ink mt-2 font-mono">
-              {gcpVmCount}
+            <div className="text-2xl sm:text-3xl font-black text-ink mt-2 font-mono flex items-baseline gap-2">
+              <span>{gcpVmCount}</span>
+              <span className="text-[11px] text-ink-soft font-normal">e2-std-4</span>
+            </div>
+          </div>
+
+          <div className="bg-card border border-line p-5 rounded-2xl bg-gradient-to-br from-card to-paper/80">
+            <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1.5">
+              <IconCoin size={14} className="text-emerald-400" /> GCP Cloud-Kosten
+            </span>
+            <div className="text-2xl sm:text-3xl font-black text-emerald-400 mt-2 font-mono flex items-baseline gap-1.5">
+              <span>~{totalMonthlyCloudCost.toFixed(2)} €</span>
+              <span className="text-[11px] text-ink-soft font-normal">/ Mo.</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Bereitstellungs-Wizard mit 3 Optionen */}
+      {/* Bereitstellungs-Wizard mit 3 Optionen inkl. Kostentransparenz */}
       {showForm && (
         <div className="bg-card border-2 border-signal/40 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6 animate-fade-in">
           <div className="flex items-center justify-between border-b border-line pb-4">
@@ -355,70 +399,88 @@ export default function ControlPlaneCockpit() {
               />
             </div>
 
-            {/* 3 Bereitstellungsziele */}
+            {/* 3 Bereitstellungsziele mit Kosten */}
             <div>
               <label className="block text-xs font-bold text-ink-soft uppercase tracking-wider mb-2">
-                Bereitstellungsziel
+                Bereitstellungsziel & Laufende Infrastruktur-Kosten
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <button
                   type="button"
                   onClick={() => setDeployType("docker_stack")}
-                  className={`p-5 rounded-2xl border text-left transition-all cursor-pointer ${
+                  className={`p-5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
                     deployType === "docker_stack"
                       ? "bg-amber-500/10 border-amber-500 ring-2 ring-amber-500/20"
                       : "bg-paper/40 border-line hover:border-line-strong opacity-80"
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-bold text-amber-500 flex items-center gap-1.5">
-                      <IconShieldLock size={16} /> 🐳 Lokaler Docker
-                    </span>
-                    {deployType === "docker_stack" && <IconCheck size={16} className="text-amber-500" />}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-bold text-amber-500 flex items-center gap-1.5">
+                        <IconShieldLock size={16} /> 🐳 Lokaler Docker
+                      </span>
+                      {deployType === "docker_stack" && <IconCheck size={16} className="text-amber-500" />}
+                    </div>
+                    <p className="text-xs text-ink-soft leading-relaxed mb-3">
+                      Startet direkt auf diesem Server als isolierter Container-Stack.
+                    </p>
                   </div>
-                  <p className="text-xs text-ink-soft leading-relaxed">
-                    Startet direkt auf diesem Server als isolierter Docker-Stack (0 € Cloud-Kosten).
-                  </p>
+                  <div className="pt-2 border-t border-line/50 flex items-center justify-between">
+                    <span className="text-[11px] text-ink-soft">Infrastruktur:</span>
+                    <span className="text-xs font-bold font-mono text-emerald-400">0,00 € / Monat</span>
+                  </div>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setDeployType("gcp_cloud_run")}
-                  className={`p-5 rounded-2xl border text-left transition-all cursor-pointer ${
+                  className={`p-5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
                     deployType === "gcp_cloud_run"
                       ? "bg-sky-500/10 border-sky-500 ring-2 ring-sky-500/20"
                       : "bg-paper/40 border-line hover:border-line-strong opacity-80"
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-bold text-sky-500 flex items-center gap-1.5">
-                      <IconCloud size={16} /> ☁️ GCP Cloud Run
-                    </span>
-                    {deployType === "gcp_cloud_run" && <IconCheck size={16} className="text-sky-500" />}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-bold text-sky-500 flex items-center gap-1.5">
+                        <IconCloud size={16} /> ☁️ GCP Cloud Run
+                      </span>
+                      {deployType === "gcp_cloud_run" && <IconCheck size={16} className="text-sky-500" />}
+                    </div>
+                    <p className="text-xs text-ink-soft leading-relaxed mb-3">
+                      Serverless Container in Frankfurt mit automatischer HTTPS-Domain.
+                    </p>
                   </div>
-                  <p className="text-xs text-ink-soft leading-relaxed">
-                    Serverless Docker Container in Frankfurt (europe-west3) mit automatischer HTTPS-Domain.
-                  </p>
+                  <div className="pt-2 border-t border-line/50 flex items-center justify-between">
+                    <span className="text-[11px] text-ink-soft">Infrastruktur:</span>
+                    <span className="text-xs font-bold font-mono text-sky-400">~ 15 – 35 € / Mo.</span>
+                  </div>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setDeployType("gcp_vm")}
-                  className={`p-5 rounded-2xl border text-left transition-all cursor-pointer ${
+                  className={`p-5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
                     deployType === "gcp_vm"
                       ? "bg-signal/10 border-signal ring-2 ring-signal/20"
                       : "bg-paper/40 border-line hover:border-line-strong opacity-80"
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-bold text-signal flex items-center gap-1.5">
-                      <IconBolt size={16} /> 🏢 Dedicated GCP VM
-                    </span>
-                    {deployType === "gcp_vm" && <IconCheck size={16} className="text-signal" />}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-bold text-signal flex items-center gap-1.5">
+                        <IconBolt size={16} /> 🏢 Dedicated GCP VM
+                      </span>
+                      {deployType === "gcp_vm" && <IconCheck size={16} className="text-signal" />}
+                    </div>
+                    <p className="text-xs text-ink-soft leading-relaxed mb-3">
+                      Dedizierte Compute VM (e2-std-4, 16 GB RAM) mit Public IP in Frankfurt.
+                    </p>
                   </div>
-                  <p className="text-xs text-ink-soft leading-relaxed">
-                    Dedizierte Compute Engine VM mit eigener Public IP und Systemd-Autostart.
-                  </p>
+                  <div className="pt-2 border-t border-line/50 flex items-center justify-between">
+                    <span className="text-[11px] text-ink-soft">Infrastruktur:</span>
+                    <span className="text-xs font-bold font-mono text-signal">~ 112,50 € / Mo.</span>
+                  </div>
                 </button>
               </div>
             </div>
@@ -448,7 +510,7 @@ export default function ControlPlaneCockpit() {
       <div className="bg-card border border-line rounded-2xl overflow-hidden shadow-sm">
         <div className="p-5 border-b border-line flex items-center justify-between">
           <h2 className="font-bold text-sm text-ink">Verwaltete Kunden-Appliances</h2>
-          <span className="text-xs text-ink-soft font-mono">Live-Status & Steuerung</span>
+          <span className="text-xs text-ink-soft font-mono">Live-Status & Kostenkontrolle</span>
         </div>
 
         {loading && instances.length === 0 ? (
@@ -478,141 +540,154 @@ export default function ControlPlaneCockpit() {
                   <th className="py-3 px-5">Status</th>
                   <th className="py-3 px-4">Mandant / Name</th>
                   <th className="py-3 px-4">Bereitstellung</th>
+                  <th className="py-3 px-4">Laufende Kosten (GCP)</th>
                   <th className="py-3 px-4">Endpunkt URL</th>
                   <th className="py-3 px-4 text-center">Appliance Öffnen</th>
                   <th className="py-3 px-5 text-right">Steuerung & Aktionen</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line/60">
-                {instances.map((inst) => (
-                  <tr key={inst.id} className="hover:bg-paper/30 transition-colors">
-                    <td className="py-4 px-5 whitespace-nowrap">
-                      {inst.status === "running" && (
-                        <span className="inline-flex items-center gap-1.5 text-emerald-500 font-bold font-mono">
-                          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                          RUNNING
-                        </span>
-                      )}
-                      {inst.status === "stopped" && (
-                        <span className="inline-flex items-center gap-1.5 text-ink-soft font-bold font-mono">
-                          <span className="h-2 w-2 rounded-full bg-ink-soft"></span>
-                          STOPPED
-                        </span>
-                      )}
-                      {inst.status === "provisioning" && (
-                        <span className="inline-flex items-center gap-1.5 text-amber-500 font-bold font-mono">
-                          <span className="h-2 w-2 rounded-full bg-amber-500 animate-spin"></span>
-                          BOOTSTRAP...
-                        </span>
-                      )}
-                      {inst.status === "error" && (
-                        <span className="inline-flex items-center gap-1.5 text-danger font-bold font-mono">
-                          <span className="h-2 w-2 rounded-full bg-danger"></span>
-                          ERROR
-                        </span>
-                      )}
-                    </td>
+                {instances.map((inst) => {
+                  const cost = calculateCost(inst);
+                  return (
+                    <tr key={inst.id} className="hover:bg-paper/30 transition-colors">
+                      <td className="py-4 px-5 whitespace-nowrap">
+                        {inst.status === "running" && (
+                          <span className="inline-flex items-center gap-1.5 text-emerald-500 font-bold font-mono">
+                            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                            RUNNING
+                          </span>
+                        )}
+                        {inst.status === "stopped" && (
+                          <span className="inline-flex items-center gap-1.5 text-ink-soft font-bold font-mono">
+                            <span className="h-2 w-2 rounded-full bg-ink-soft"></span>
+                            STOPPED
+                          </span>
+                        )}
+                        {inst.status === "provisioning" && (
+                          <span className="inline-flex items-center gap-1.5 text-amber-500 font-bold font-mono">
+                            <span className="h-2 w-2 rounded-full bg-amber-500 animate-spin"></span>
+                            BOOTSTRAP...
+                          </span>
+                        )}
+                        {inst.status === "error" && (
+                          <span className="inline-flex items-center gap-1.5 text-danger font-bold font-mono">
+                            <span className="h-2 w-2 rounded-full bg-danger"></span>
+                            ERROR
+                          </span>
+                        )}
+                      </td>
 
-                    <td className="py-4 px-4 font-medium text-ink">
-                      <div className="font-bold text-sm text-ink">{inst.name}</div>
-                      <div className="text-[11px] text-ink-soft font-mono">ID: {inst.tenant_id}</div>
-                    </td>
+                      <td className="py-4 px-4 font-medium text-ink">
+                        <div className="font-bold text-sm text-ink">{inst.name}</div>
+                        <div className="text-[11px] text-ink-soft font-mono">ID: {inst.tenant_id}</div>
+                      </td>
 
-                    <td className="py-4 px-4">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-mono bg-paper border border-line">
-                        {inst.type === "gcp_vm" && "🏢 Dedicated GCP VM"}
-                        {inst.type === "gcp_cloud_run" && "☁️ GCP Cloud Run"}
-                        {inst.type === "docker_stack" && "🐳 Lokaler Docker"}
-                      </span>
-                    </td>
+                      <td className="py-4 px-4">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-mono bg-paper border border-line">
+                          {inst.type === "gcp_vm" && "🏢 Dedicated GCP VM"}
+                          {inst.type === "gcp_cloud_run" && "☁️ GCP Cloud Run"}
+                          {inst.type === "docker_stack" && "🐳 Lokaler Docker"}
+                        </span>
+                      </td>
 
-                    <td className="py-4 px-4 font-mono text-[11px]">
-                      {inst.endpoint_url ? (
-                        <span className="text-ink">{inst.endpoint_url}</span>
-                      ) : (
-                        <span className="text-ink-soft italic">Wird zugewiesen...</span>
-                      )}
-                    </td>
+                      {/* Laufende Kosten */}
+                      <td className="py-4 px-4 whitespace-nowrap">
+                        <div className="font-mono font-bold text-ink text-xs flex items-baseline gap-1">
+                          <span>{cost.monthly}</span>
+                          <span className="text-[10px] text-ink-soft font-normal">/ Mo.</span>
+                        </div>
+                        <div className="text-[10px] text-ink-soft font-mono">{cost.detail}</div>
+                      </td>
 
-                    <td className="py-4 px-4 text-center">
-                      {inst.status === "running" && inst.endpoint_url ? (
-                        <a
-                          href={inst.endpoint_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 btn-primary text-xs py-1.5 px-3 rounded-lg shadow-sm"
+                      <td className="py-4 px-4 font-mono text-[11px]">
+                        {inst.endpoint_url ? (
+                          <span className="text-ink">{inst.endpoint_url}</span>
+                        ) : (
+                          <span className="text-ink-soft italic">Wird zugewiesen...</span>
+                        )}
+                      </td>
+
+                      <td className="py-4 px-4 text-center">
+                        {inst.status === "running" && inst.endpoint_url ? (
+                          <a
+                            href={inst.endpoint_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 btn-primary text-xs py-1.5 px-3 rounded-lg shadow-sm"
+                          >
+                            <span>🚀 Appliance öffnen</span>
+                            <IconExternalLink size={13} />
+                          </a>
+                        ) : inst.status === "stopped" ? (
+                          <span className="text-ink-soft text-[11px] italic">Pausiert</span>
+                        ) : (
+                          <span className="text-ink-soft text-[11px]">In Vorbereitung</span>
+                        )}
+                      </td>
+
+                      <td className="py-4 px-5 text-right whitespace-nowrap space-x-2">
+                        {/* Pause / Start / Retry Buttons */}
+                        {inst.status === "running" && (
+                          <button
+                            type="button"
+                            disabled={actionLoadingId === inst.id}
+                            onClick={() => handlePause(inst.id)}
+                            className="btn-secondary text-xs py-1.5 px-3 inline-flex items-center gap-1.5 font-bold text-amber-500 border-amber-500/30 hover:bg-amber-500/10 cursor-pointer"
+                            title="Instanz pausieren (stoppen)"
+                          >
+                            <IconPlayerPause size={14} /> Pausieren
+                          </button>
+                        )}
+
+                        {inst.status === "stopped" && (
+                          <button
+                            type="button"
+                            disabled={actionLoadingId === inst.id}
+                            onClick={() => handleStart(inst.id)}
+                            className="btn-secondary text-xs py-1.5 px-3 inline-flex items-center gap-1.5 font-bold text-emerald-500 border-emerald-500/30 hover:bg-emerald-500/10 cursor-pointer"
+                            title="Instanz starten (fortsetzen)"
+                          >
+                            <IconPlayerPlay size={14} /> Fortsetzen
+                          </button>
+                        )}
+
+                        {inst.status === "error" && (
+                          <button
+                            type="button"
+                            disabled={actionLoadingId === inst.id}
+                            onClick={() => handleStart(inst.id)}
+                            className="btn-secondary text-xs py-1.5 px-3 inline-flex items-center gap-1.5 font-bold text-sky-500 border-sky-500/30 hover:bg-sky-500/10 cursor-pointer"
+                            title="Instanz neu starten"
+                          >
+                            <IconRefresh size={14} /> Neu starten
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => openLogsModal(inst.id)}
+                          className={`btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1 cursor-pointer ${
+                            selectedLogsId === inst.id ? "bg-signal/15 border-signal text-signal" : ""
+                          }`}
+                          title="Logs ansehen"
                         >
-                          <span>🚀 Appliance öffnen</span>
-                          <IconExternalLink size={13} />
-                        </a>
-                      ) : inst.status === "stopped" ? (
-                        <span className="text-ink-soft text-[11px] italic">Pausiert</span>
-                      ) : (
-                        <span className="text-ink-soft text-[11px]">In Vorbereitung</span>
-                      )}
-                    </td>
+                          <IconTerminal2 size={13} /> Logs
+                        </button>
 
-                    <td className="py-4 px-5 text-right whitespace-nowrap space-x-2">
-                      {/* Pause / Start / Retry Buttons */}
-                      {inst.status === "running" && (
                         <button
                           type="button"
                           disabled={actionLoadingId === inst.id}
-                          onClick={() => handlePause(inst.id)}
-                          className="btn-secondary text-xs py-1.5 px-3 inline-flex items-center gap-1.5 font-bold text-amber-500 border-amber-500/30 hover:bg-amber-500/10 cursor-pointer"
-                          title="Instanz pausieren (stoppen)"
+                          onClick={() => handleDelete(inst.id, inst.name)}
+                          className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1 text-danger hover:bg-danger/10 border-danger/20 cursor-pointer"
+                          title="Instanz löschen"
                         >
-                          <IconPlayerPause size={14} /> Pausieren
+                          <IconTrash size={13} /> Löschen
                         </button>
-                      )}
-
-                      {inst.status === "stopped" && (
-                        <button
-                          type="button"
-                          disabled={actionLoadingId === inst.id}
-                          onClick={() => handleStart(inst.id)}
-                          className="btn-secondary text-xs py-1.5 px-3 inline-flex items-center gap-1.5 font-bold text-emerald-500 border-emerald-500/30 hover:bg-emerald-500/10 cursor-pointer"
-                          title="Instanz starten (fortsetzen)"
-                        >
-                          <IconPlayerPlay size={14} /> Fortsetzen
-                        </button>
-                      )}
-
-                      {inst.status === "error" && (
-                        <button
-                          type="button"
-                          disabled={actionLoadingId === inst.id}
-                          onClick={() => handleStart(inst.id)}
-                          className="btn-secondary text-xs py-1.5 px-3 inline-flex items-center gap-1.5 font-bold text-sky-500 border-sky-500/30 hover:bg-sky-500/10 cursor-pointer"
-                          title="Instanz neu starten"
-                        >
-                          <IconRefresh size={14} /> Neu starten
-                        </button>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => openLogsModal(inst.id)}
-                        className={`btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1 cursor-pointer ${
-                          selectedLogsId === inst.id ? "bg-signal/15 border-signal text-signal" : ""
-                        }`}
-                        title="Logs ansehen"
-                      >
-                        <IconTerminal2 size={13} /> Logs
-                      </button>
-
-                      <button
-                        type="button"
-                        disabled={actionLoadingId === inst.id}
-                        onClick={() => handleDelete(inst.id, inst.name)}
-                        className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1 text-danger hover:bg-danger/10 border-danger/20 cursor-pointer"
-                        title="Instanz löschen"
-                      >
-                        <IconTrash size={13} /> Löschen
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
