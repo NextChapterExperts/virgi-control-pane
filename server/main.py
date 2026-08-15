@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import socket
 import uuid
 from typing import Any, Dict, List, Literal, Optional
@@ -132,7 +133,7 @@ def api_get_instance(instance_id: str):
 
 @app.post("/v1/instances/provision")
 def api_provision_instance(req: ProvisionRequest):
-    clean_tenant = req.tenant_id.lower().replace("_", "-").replace(" ", "-")
+    clean_tenant = re.sub(r"[^a-z0-9]+", "-", req.tenant_id.lower()).strip("-") or "mandant"
     instance_id = f"inst_{clean_tenant}_{uuid.uuid4().hex[:6]}"
     
     if req.type == "gcp_vm":

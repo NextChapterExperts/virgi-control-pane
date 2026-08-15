@@ -75,9 +75,9 @@ export default function ControlPlaneCockpit() {
 
     setProvisioning(true);
     try {
-      const tenantId = companyName.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-");
+      const tenantId = companyName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "mandant";
       const payload = {
-        tenant_id: tenantId || "mandant",
+        tenant_id: tenantId,
         company_name: companyName.trim(),
         type: deployType,
         region: "europe-west3",

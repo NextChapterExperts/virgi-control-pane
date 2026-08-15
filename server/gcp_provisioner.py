@@ -125,12 +125,12 @@ def _provision_gcp_vm_worker(
     machine_type: str,
     project: str,
 ) -> None:
-    sanitized = re.sub(r"[^a-z0-9\-]", "", tenant_id.lower().replace("_", "-"))
-    vm_name = f"virki-{sanitized}"
+    clean_tenant = re.sub(r"[^a-z0-9]+", "-", tenant_id.lower()).strip("-") or "mandant"
+    vm_name = f"virki-{clean_tenant}"[:63].rstrip("-")
     
     dist_repo_url = _get_dist_repo_url()
     
-    append_log(instance_id, f"🚀 Starte GCP Compute VM Provisionierung für Mandant '{tenant_id}' ({company_name})...")
+    append_log(instance_id, f"🚀 Starte GCP Compute VM Provisionierung für Mandant '{clean_tenant}' ({company_name})...")
     append_log(instance_id, f"📍 Zone: {zone} · Maschinentyp: {machine_type} · Projekt: {project}")
 
     # Startup-Script: Klont virgi-platform-dist:main, richtet systemd Autostart ein und startet Docker-Stack
@@ -265,13 +265,13 @@ def _provision_gcp_cloud_run_worker(
     region: str,
     project: str,
 ) -> None:
-    sanitized = re.sub(r"[^a-z0-9\-]", "", tenant_id.lower().replace("_", "-"))
-    service_name = f"virki-{sanitized}"
-    instance_dir = Path("/tmp/virki_instances") / tenant_id
+    clean_tenant = re.sub(r"[^a-z0-9]+", "-", tenant_id.lower()).strip("-") or "mandant"
+    service_name = f"virki-{clean_tenant}"[:63].rstrip("-")
+    instance_dir = Path("/tmp/virki_instances") / clean_tenant
     repo_dir = instance_dir / "repo"
 
     dist_repo_url = _get_dist_repo_url()
-    append_log(instance_id, f"☁️ Starte Google Cloud Run Container Bereitstellung für Mandant '{tenant_id}' ({company_name})...")
+    append_log(instance_id, f"☁️ Starte Google Cloud Run Container Bereitstellung für Mandant '{clean_tenant}' ({company_name})...")
     append_log(instance_id, f"📍 Region: {region} · Projekt: {project} · Service: {service_name}")
 
     try:
@@ -294,6 +294,14 @@ def _provision_gcp_cloud_run_worker(
                 text=True,
             )
 
+        # Dockerfile & Entrypoint in Root-Kontext kopieren für Cloud Build
+        dockerfile_src = repo_dir / "deploy" / "docker" / "Dockerfile"
+        if dockerfile_src.exists():
+            shutil.copy2(dockerfile_src, repo_dir / "Dockerfile")
+        entrypoint_src = repo_dir / "deploy" / "docker" / "entrypoint.sh"
+        if entrypoint_src.exists():
+            shutil.copy2(entrypoint_src, repo_dir / "entrypoint.sh")
+
         # 2. Cloud Run Build & Deploy
         append_log(instance_id, f"🏗️ Erstelle und deploye Container Service '{service_name}' auf Cloud Run...")
         cmd_deploy = [
@@ -305,7 +313,7 @@ def _provision_gcp_cloud_run_worker(
             "--port=8090",
             "--memory=2Gi",
             "--cpu=2",
-            f"--set-env-vars=AIOS_TENANT_ID={tenant_id},AIOS_COMPANY_NAME={company_name}",
+            f"--set-env-vars=AIOS_TENANT_ID={clean_tenant},AIOS_COMPANY_NAME={company_name}",
             "--format=json",
         ]
         deploy_res = _run_gcloud(cmd_deploy)
