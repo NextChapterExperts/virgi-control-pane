@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   IconServer,
   IconExternalLink,
@@ -15,6 +15,7 @@ import {
   IconChevronUp,
   IconPlayerPause,
   IconPlayerPlay,
+  IconCopy,
 } from "@tabler/icons-react";
 
 interface Instance {
@@ -35,9 +36,14 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 export default function ControlPlaneCockpit() {
   const [instances, setInstances] = useState<Instance[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Live Log Streaming & Auto-Close / Keep-Open states
   const [selectedLogsId, setSelectedLogsId] = useState<string | null>(null);
+  const [selectedLogsInstance, setSelectedLogsInstance] = useState<Instance | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [autoCloseTriggered, setAutoCloseTriggered] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   // Form states
@@ -46,11 +52,76 @@ export default function ControlPlaneCockpit() {
   const [deployType, setDeployType] = useState<"docker_stack" | "gcp_cloud_run" | "gcp_vm">("docker_stack");
   const [provisioning, setProvisioning] = useState(false);
 
+  const logsEndRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     loadInstances();
-    const interval = setInterval(loadInstances, 5000);
+    const interval = setInterval(loadInstances, 4000);
     return () => clearInterval(interval);
   }, []);
+
+  // Live polling for selected logs
+  useEffect(() => {
+    if (!selectedLogsId) {
+      setLogs([]);
+      setSelectedLogsInstance(null);
+      setAutoCloseTriggered(false);
+      return;
+    }
+
+    let isSubscribed = true;
+    const fetchLogsAndStatus = async () => {
+      try {
+        const [logsRes, instRes] = await Promise.all([
+          fetch(`${API_BASE}/v1/instances/${selectedLogsId}/logs`),
+          fetch(`${API_BASE}/v1/instances/${selectedLogsId}`),
+        ]);
+
+        if (!isSubscribed) return;
+
+        if (logsRes.ok) {
+          const data = await logsRes.json();
+          setLogs(data.logs.map((l: any) => `[${new Date(l.timestamp * 1000).toLocaleTimeString()}] ${l.level}: ${l.message}`));
+        }
+
+        if (instRes.ok) {
+          const instData = await instRes.json();
+          const inst = instData.instance as Instance;
+          setSelectedLogsInstance(inst);
+
+          // Wenn die Instanz erfolgreich auf "running" gewechselt ist: Nach 2.5s automatisch schließen!
+          if (inst.status === "running" && !autoCloseTriggered) {
+            setAutoCloseTriggered(true);
+            setTimeout(() => {
+              if (isSubscribed) {
+                setSelectedLogsId(null);
+                loadInstances();
+              }
+            }, 2500);
+          }
+        }
+      } catch (e) {
+        console.error("Fehler beim Abrufen der Live-Logs", e);
+      } finally {
+        if (isSubscribed) setLoadingLogs(false);
+      }
+    };
+
+    fetchLogsAndStatus();
+    const pollInterval = setInterval(fetchLogsAndStatus, 1500);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(pollInterval);
+    };
+  }, [selectedLogsId, autoCloseTriggered]);
+
+  // Scroll to bottom when logs update
+  useEffect(() => {
+    if (logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [logs]);
 
   const loadInstances = async () => {
     try {
@@ -92,9 +163,18 @@ export default function ControlPlaneCockpit() {
       });
 
       if (!res.ok) throw new Error("Fehler beim Starten der Bereitstellung");
+      const data = await res.json();
       
       setCompanyName("");
       setShowForm(false);
+      
+      // Öffne sofort die Live-Logs unten!
+      if (data.instance && data.instance.id) {
+        setSelectedLogsId(data.instance.id);
+        setSelectedLogsInstance(data.instance);
+        setAutoCloseTriggered(false);
+      }
+      
       loadInstances();
     } catch (err: any) {
       alert(`Fehler: ${err.message}`);
@@ -134,6 +214,9 @@ export default function ControlPlaneCockpit() {
     setActionLoadingId(id);
     try {
       await fetch(`${API_BASE}/v1/instances/${id}`, { method: "DELETE" });
+      if (selectedLogsId === id) {
+        setSelectedLogsId(null);
+      }
       loadInstances();
     } catch (e) {
       alert("Löschen fehlgeschlagen");
@@ -142,20 +225,18 @@ export default function ControlPlaneCockpit() {
     }
   };
 
-  const openLogsModal = async (id: string) => {
+  const openLogsModal = (id: string) => {
+    setAutoCloseTriggered(false);
     setSelectedLogsId(id);
-    setLoadingLogs(true);
-    try {
-      const res = await fetch(`${API_BASE}/v1/instances/${id}/logs`);
-      if (res.ok) {
-        const data = await res.json();
-        setLogs(data.logs.map((l: any) => `[${new Date(l.timestamp * 1000).toLocaleTimeString()}] ${l.level}: ${l.message}`));
-      }
-    } catch (e) {
-      setLogs(["Fehler beim Laden der Logs"]);
-    } finally {
-      setLoadingLogs(false);
-    }
+    const inst = instances.find((i) => i.id === id) || null;
+    setSelectedLogsInstance(inst);
+  };
+
+  const copyLogsToClipboard = () => {
+    const text = logs.join("\n");
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
   };
 
   // Metriken
@@ -165,7 +246,7 @@ export default function ControlPlaneCockpit() {
   const gcpVmCount = instances.filter((i) => i.type === "gcp_vm").length;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 pb-32">
       {/* Header & Metriken */}
       <div>
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
@@ -183,14 +264,14 @@ export default function ControlPlaneCockpit() {
             <button
               type="button"
               onClick={loadInstances}
-              className="btn-secondary text-xs flex items-center gap-1.5 py-2 px-3"
+              className="btn-secondary text-xs flex items-center gap-1.5 py-2 px-3 cursor-pointer"
             >
               <IconRefresh size={14} className={loading ? "animate-spin" : ""} /> Aktualisieren
             </button>
             <button
               type="button"
               onClick={() => setShowForm(!showForm)}
-              className="btn-primary text-xs flex items-center gap-1.5 py-2 px-4 shadow-sm"
+              className="btn-primary text-xs flex items-center gap-1.5 py-2 px-4 shadow-sm cursor-pointer"
             >
               {showForm ? <IconChevronUp size={16} /> : <IconPlus size={16} />}
               <span>{showForm ? "Formular schließen" : "+ Neue Appliance starten"}</span>
@@ -346,7 +427,7 @@ export default function ControlPlaneCockpit() {
               <button
                 type="submit"
                 disabled={provisioning}
-                className="btn-primary text-xs py-2.5 px-6 font-bold shadow-md inline-flex items-center gap-2"
+                className="btn-primary text-xs py-2.5 px-6 font-bold shadow-md inline-flex items-center gap-2 cursor-pointer"
               >
                 {provisioning ? (
                   <>
@@ -384,7 +465,7 @@ export default function ControlPlaneCockpit() {
             <button
               type="button"
               onClick={() => setShowForm(true)}
-              className="btn-primary text-xs inline-flex items-center gap-1.5 py-2 px-4"
+              className="btn-primary text-xs inline-flex items-center gap-1.5 py-2 px-4 cursor-pointer"
             >
               <IconPlus size={16} /> Erste Appliance anlegen
             </button>
@@ -512,7 +593,9 @@ export default function ControlPlaneCockpit() {
                       <button
                         type="button"
                         onClick={() => openLogsModal(inst.id)}
-                        className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1 cursor-pointer"
+                        className={`btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1 cursor-pointer ${
+                          selectedLogsId === inst.id ? "bg-signal/15 border-signal text-signal" : ""
+                        }`}
                         title="Logs ansehen"
                       >
                         <IconTerminal2 size={13} /> Logs
@@ -536,37 +619,91 @@ export default function ControlPlaneCockpit() {
         )}
       </div>
 
-      {/* Logs Modal */}
+      {/* Unten eingeblendetes Live-Log Terminal-Panel */}
       {selectedLogsId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="bg-card border border-line rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="p-4 border-b border-line flex items-center justify-between bg-paper/60">
-              <div className="flex items-center gap-2">
-                <IconTerminal2 size={18} className="text-signal" />
-                <h3 className="font-bold text-sm text-ink">Logs ({selectedLogsId})</h3>
+        <div className="bg-card border-2 border-line rounded-2xl overflow-hidden shadow-2xl space-y-0 transition-all">
+          {/* Header */}
+          <div className="p-4 border-b border-line flex flex-wrap items-center justify-between gap-3 bg-paper/80">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-black/80 text-emerald-400">
+                <IconTerminal2 size={20} />
               </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-sm text-ink">
+                    Live-Bereitstellungs-Logs: {selectedLogsInstance?.name || selectedLogsId}
+                  </h3>
+                  {selectedLogsInstance?.status === "running" && (
+                    <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      ✓ ERFOLGREICH BEREITGESTELLT
+                    </span>
+                  )}
+                  {selectedLogsInstance?.status === "error" && (
+                    <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-danger/20 text-danger border border-danger/30">
+                      ❌ FEHLER BEIM PROVISIONIEREN
+                    </span>
+                  )}
+                  {selectedLogsInstance?.status === "provisioning" && (
+                    <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse">
+                      ⏳ WIRD AUSGEFÜHRT...
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-ink-soft">
+                  {selectedLogsInstance?.status === "running"
+                    ? "Die Bereitstellung wurde erfolgreich abgeschlossen. Dieses Fenster schließt sich automatisch..."
+                    : selectedLogsInstance?.status === "error"
+                    ? "Fehler aufgetreten. Die Logs bleiben zur Diagnose geöffnet und können kopiert werden."
+                    : "Live-Prozessprotokollierung während der Bereitstellung."}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={copyLogsToClipboard}
+                className="btn-secondary text-xs py-1.5 px-3 inline-flex items-center gap-1.5 cursor-pointer shadow-sm hover:bg-paper"
+              >
+                {copied ? <IconCheck size={14} className="text-emerald-500" /> : <IconCopy size={14} />}
+                <span>{copied ? "Logs kopiert!" : "Logs kopieren"}</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setSelectedLogsId(null)}
-                className="text-ink-soft hover:text-ink text-sm font-bold px-2 py-1 cursor-pointer"
+                className="btn-secondary text-xs py-1.5 px-3 font-bold hover:text-ink cursor-pointer"
               >
                 ✕ Schließen
               </button>
             </div>
+          </div>
 
-            <div className="p-4 bg-black/90 font-mono text-xs text-emerald-400 overflow-y-auto flex-1 space-y-1">
-              {loadingLogs ? (
-                <div className="text-ink-soft">Lade Logs...</div>
-              ) : logs.length === 0 ? (
-                <div className="text-ink-soft italic">Noch keine Logs erfasst.</div>
-              ) : (
-                logs.map((line, idx) => (
-                  <div key={idx} className="whitespace-pre-wrap leading-relaxed">
-                    {line}
-                  </div>
-                ))
-              )}
-            </div>
+          {/* Terminal Output */}
+          <div className="p-4 bg-black/95 font-mono text-xs text-emerald-400 overflow-y-auto max-h-[400px] min-h-[160px] space-y-1 select-text">
+            {loadingLogs && logs.length === 0 ? (
+              <div className="text-ink-soft">Initialisiere Log-Streamer...</div>
+            ) : logs.length === 0 ? (
+              <div className="text-ink-soft italic">Warte auf erste Log-Ausgaben...</div>
+            ) : (
+              logs.map((line, idx) => (
+                <div
+                  key={idx}
+                  className={`whitespace-pre-wrap leading-relaxed ${
+                    line.includes("ERROR") || line.includes("❌")
+                      ? "text-red-400 font-bold"
+                      : line.includes("WARNING") || line.includes("⚠️")
+                      ? "text-amber-300"
+                      : line.includes("✓") || line.includes("🎉")
+                      ? "text-emerald-300 font-bold"
+                      : "text-emerald-400/90"
+                  }`}
+                >
+                  {line}
+                </div>
+              ))
+            )}
+            <div ref={logsEndRef} />
           </div>
         </div>
       )}
