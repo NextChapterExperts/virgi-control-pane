@@ -373,3 +373,72 @@ async def api_proxy_instance(instance_id: str, request: Request, path: str = "")
             )
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"Proxy-Fehler beim Verbinden mit Appliance: {exc}")
+
+
+@app.api_route("/_next/{path:path}", methods=["GET", "HEAD"])
+async def proxy_next_static(path: str, request: Request):
+    """Leitet Next.js Static Chunks für Cloud Run transparent weiter."""
+    for inst in list_instances():
+        if inst.get("type") == "gcp_cloud_run" and inst.get("status") == "running":
+            target_url = f"{inst['endpoint_url'].rstrip('/')}/_next/{path}"
+            headers = {}
+            try:
+                token_res = subprocess.run(
+                    ["/opt/google-cloud-sdk/bin/gcloud", "auth", "print-identity-token"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if token_res.returncode == 0 and token_res.stdout.strip():
+                    headers["Authorization"] = f"Bearer {token_res.stdout.strip()}"
+            except Exception:
+                pass
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                try:
+                    resp = await client.get(target_url, headers=headers, timeout=15.0)
+                    return Response(
+                        content=resp.content,
+                        status_code=resp.status_code,
+                        headers={k: v for k, v in resp.headers.items() if k.lower() not in ["content-encoding", "content-length", "transfer-encoding"]},
+                        media_type=resp.headers.get("content-type"),
+                    )
+                except Exception:
+                    pass
+    raise HTTPException(status_code=404, detail="Asset not found")
+
+
+@app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
+async def proxy_api_calls(path: str, request: Request):
+    """Leitet API-Aufrufe der Next.js UI transparent an Cloud Run weiter."""
+    for inst in list_instances():
+        if inst.get("type") == "gcp_cloud_run" and inst.get("status") == "running":
+            target_url = f"{inst['endpoint_url'].rstrip('/')}/api/{path}"
+            if request.url.query:
+                target_url += f"?{request.url.query}"
+            headers = {k: v for k, v in request.headers.items() if k.lower() not in ["host", "content-length"]}
+            try:
+                token_res = subprocess.run(
+                    ["/opt/google-cloud-sdk/bin/gcloud", "auth", "print-identity-token"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if token_res.returncode == 0 and token_res.stdout.strip():
+                    headers["Authorization"] = f"Bearer {token_res.stdout.strip()}"
+            except Exception:
+                pass
+            body = await request.body()
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                try:
+                    resp = await client.request(
+                        method=request.method,
+                        url=target_url,
+                        headers=headers,
+                        content=body,
+                        timeout=30.0,
+                    )
+                    return Response(
+                        content=resp.content,
+                        status_code=resp.status_code,
+                        headers={k: v for k, v in resp.headers.items() if k.lower() not in ["content-encoding", "content-length", "transfer-encoding"]},
+                        media_type=resp.headers.get("content-type"),
+                    )
+                except Exception:
+                    pass
+    raise HTTPException(status_code=404, detail="API route not found")
