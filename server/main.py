@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import socket
+import subprocess
 import uuid
 from typing import Any, Dict, List, Literal, Optional
 
@@ -91,20 +92,50 @@ class ProvisionRequest(BaseModel):
 # Hilfsfunktionen
 # -----------------------------------------------------------------------------
 
-def _is_port_in_use(port: int) -> bool:
+def _get_allocated_host_ports() -> set[int]:
+    """Sammelt alle belegten Ports aus laufenden Docker-Containern und der Control-Plane DB."""
+    used_ports = {8080, 8090, 8091, 8280, 8190, 8191, 3000, 4000, 5432, 6333, 6334, 8888, 8283}
+    
+    # 1. Aus laufenden Docker-Containern via docker cli ermitteln
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.5)
-            return s.connect_ex(('127.0.0.1', port)) == 0
-    except Exception:
-        return False
+        res = subprocess.run(
+            ["docker", "ps", "--format", "{{.Ports}}"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        if res.returncode == 0:
+            for line in res.stdout.splitlines():
+                for match in re.finditer(r":(\d+)->", line):
+                    used_ports.add(int(match.group(1)))
+    except Exception as exc:
+        log.warning("Konnte Docker Ports nicht abfragen: %s", exc)
+
+    # 2. Aus der Control Plane Datenbank ermitteln
+    try:
+        for inst in list_instances():
+            for url_field in ["endpoint_url", "backend_url"]:
+                url = inst.get(url_field) or ""
+                match = re.search(r":(\d+)", url)
+                if match:
+                    used_ports.add(int(match.group(1)))
+    except Exception as exc:
+        log.warning("Konnte DB Ports nicht abfragen: %s", exc)
+
+    return used_ports
 
 
-def _find_free_ports(web_port: int, api_port: int) -> tuple[int, int]:
-    w, a = web_port, api_port
-    while _is_port_in_use(w) or _is_port_in_use(a):
+def _find_free_ports(start_web: int = 8200, start_api: int = 8201) -> tuple[int, int]:
+    """Findet dynamisch die nächsten garantierten freien Ports für eine neue Appliance."""
+    used = _get_allocated_host_ports()
+    
+    w = max(start_web, 8200)
+    a = w + 1
+    
+    while w in used or a in used:
         w += 2
-        a += 2
+        a = w + 1
+        
     return w, a
 
 
