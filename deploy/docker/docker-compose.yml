@@ -1,9 +1,9 @@
-version: '3.8'
+name: virki-control-plane
 
 services:
   control-plane-backend:
     build:
-      context: ..
+      context: ../..
       dockerfile: deploy/docker/Dockerfile.backend
     container_name: virki-control-plane-backend
     restart: unless-stopped
@@ -22,7 +22,7 @@ services:
 
   control-plane-web:
     build:
-      context: ..
+      context: ../..
       dockerfile: deploy/docker/Dockerfile.web
     container_name: virki-control-plane-web
     restart: unless-stopped

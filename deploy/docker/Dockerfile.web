@@ -5,7 +5,11 @@ WORKDIR /app
 COPY web/package.json ./
 RUN npm install
 
-COPY web/ ./
+COPY web/src ./src
+COPY web/next.config.mjs ./next.config.mjs
+COPY web/tsconfig.json ./tsconfig.json
+COPY web/postcss.config.mjs ./postcss.config.mjs
+
 RUN npm run build
 
 FROM node:20-alpine AS runner
@@ -18,7 +22,6 @@ ENV PORT=8280
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/public ./public 2>/dev/null || true
 
 EXPOSE 8280
 
