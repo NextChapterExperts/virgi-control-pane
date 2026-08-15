@@ -12,6 +12,8 @@ import {
   IconAlertTriangle,
   IconTerminal2,
   IconPlus,
+  IconReceipt2,
+  IconTrendingUp,
 } from "@tabler/icons-react";
 
 interface Instance {
@@ -24,11 +26,24 @@ interface Instance {
   backend_url: string;
   zone?: string;
   machine_type?: string;
-  plan: string;
+  plan: "sovereign" | "managed" | "enterprise";
   created_at: number;
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+
+// Kosten- & Preiskalkulation pro Instanz-Typ
+const PLAN_REVENUE: Record<string, number> = {
+  sovereign: 190.0,
+  managed: 490.0,
+  enterprise: 1490.0,
+};
+
+const MACHINE_COST_MONTHLY: Record<string, number> = {
+  "e2-standard-4": 113.0, // GCP Frankfurt e2-std-4 + 50GB PD
+  "e2-standard-8": 225.0, // GCP Frankfurt e2-std-8 + 100GB PD
+  "e2-medium": 32.0,      // GCP Frankfurt e2-med + 30GB PD
+};
 
 export default function FleetDashboardPage() {
   const [instances, setInstances] = useState<Instance[]>([]);
@@ -83,9 +98,25 @@ export default function FleetDashboardPage() {
     }
   };
 
+  const getInstanceCost = (inst: Instance): number => {
+    if (inst.type === "docker_stack") return 0.0;
+    const mType = inst.machine_type || "e2-standard-4";
+    return MACHINE_COST_MONTHLY[mType] || 113.0;
+  };
+
+  const getInstanceRevenue = (inst: Instance): number => {
+    return PLAN_REVENUE[inst.plan] || 490.0;
+  };
+
+  // KPIs
   const activeCount = instances.filter((i) => i.status === "running").length;
-  const vmCount = instances.filter((i) => i.type === "gcp_vm").length;
-  const dockerCount = instances.filter((i) => i.type === "docker_stack").length;
+  const totalCostMonthly = instances
+    .filter((i) => i.status === "running" || i.status === "provisioning")
+    .reduce((acc, i) => acc + getInstanceCost(i), 0);
+  const totalRevenueMonthly = instances
+    .filter((i) => i.status === "running")
+    .reduce((acc, i) => acc + getInstanceRevenue(i), 0);
+  const totalMarginMonthly = totalRevenueMonthly - totalCostMonthly;
 
   return (
     <div className="space-y-8">
@@ -97,7 +128,7 @@ export default function FleetDashboardPage() {
             Flotten- & Mandanten-Dashboard
           </h1>
           <p className="text-xs sm:text-sm text-ink-soft mt-1">
-            Zentrale Übersicht aller bereitgestellten VIRKI AI-OS Instanzen mit Direkt-Absprung in die Kunden-Appliance.
+            Zentrale Übersicht aller bereitgestellten VIRKI AI-OS Instanzen inklusive Live-Kosten, Erlösen und Direkt-Absprung.
           </p>
         </div>
 
@@ -115,29 +146,43 @@ export default function FleetDashboardPage() {
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      {/* KPI Cards: Flotte & Kosten/Umsatz */}
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         <div className="bg-card border border-line p-5 rounded-2xl">
           <span className="text-xs text-ink-soft uppercase font-bold tracking-wider">Aktive Instanzen</span>
-          <div className="text-3xl font-black text-ink mt-2 flex items-baseline gap-2">
+          <div className="text-2xl sm:text-3xl font-black text-ink mt-2 flex items-baseline gap-2">
             <span>{activeCount}</span>
             <span className="text-xs text-ink-soft font-normal">/ {instances.length} Gesamt</span>
           </div>
         </div>
 
         <div className="bg-card border border-line p-5 rounded-2xl">
-          <span className="text-xs text-ink-soft uppercase font-bold tracking-wider">Google Cloud VMs</span>
-          <div className="text-3xl font-black text-ink mt-2 flex items-baseline gap-2">
-            <span>{vmCount}</span>
-            <span className="text-xs text-ink-soft font-normal">Dedicated VMs</span>
+          <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1">
+            <IconReceipt2 size={13} className="text-amber-500" /> Cloud-Kosten (GCP)
+          </span>
+          <div className="text-2xl sm:text-3xl font-black text-amber-500 mt-2 flex items-baseline gap-1 font-mono">
+            <span>{totalCostMonthly.toFixed(2)} €</span>
+            <span className="text-[11px] text-ink-soft font-normal font-sans">/ Monat</span>
           </div>
         </div>
 
         <div className="bg-card border border-line p-5 rounded-2xl">
-          <span className="text-xs text-ink-soft uppercase font-bold tracking-wider">Docker Appliances</span>
-          <div className="text-3xl font-black text-ink mt-2 flex items-baseline gap-2">
-            <span>{dockerCount}</span>
-            <span className="text-xs text-ink-soft font-normal">Container Stacks</span>
+          <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1">
+            <IconTrendingUp size={13} className="text-emerald-500" /> SaaS-Umsatz (MRR)
+          </span>
+          <div className="text-2xl sm:text-3xl font-black text-emerald-500 mt-2 flex items-baseline gap-1 font-mono">
+            <span>{totalRevenueMonthly.toFixed(2)} €</span>
+            <span className="text-[11px] text-ink-soft font-normal font-sans">/ Monat</span>
+          </div>
+        </div>
+
+        <div className="bg-card border border-line p-5 rounded-2xl">
+          <span className="text-xs text-ink-soft uppercase font-bold tracking-wider">Netto-Marge (Gewinn)</span>
+          <div className="text-2xl sm:text-3xl font-black text-signal mt-2 flex items-baseline gap-1 font-mono">
+            <span>+{totalMarginMonthly.toFixed(2)} €</span>
+            <span className="text-[11px] text-ink-soft font-normal font-sans">
+              ({totalRevenueMonthly > 0 ? ((totalMarginMonthly / totalRevenueMonthly) * 100).toFixed(0) : 0}%)
+            </span>
           </div>
         </div>
       </div>
@@ -171,93 +216,107 @@ export default function FleetDashboardPage() {
                 <tr className="border-b border-line bg-paper/50 text-ink-soft uppercase text-[10px] tracking-wider">
                   <th className="py-3 px-5">Status</th>
                   <th className="py-3 px-4">Mandant / Name</th>
-                  <th className="py-3 px-4">Typ & Plan</th>
+                  <th className="py-3 px-4">Typ & Hardware</th>
+                  <th className="py-3 px-4">Kosten & Erlös / Mo</th>
                   <th className="py-3 px-4">Endpunkt / URL</th>
                   <th className="py-3 px-4 text-center">Appliance Öffnen</th>
                   <th className="py-3 px-5 text-right">Aktionen</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line/60">
-                {instances.map((inst) => (
-                  <tr key={inst.id} className="hover:bg-paper/30 transition-colors">
-                    <td className="py-4 px-5 whitespace-nowrap">
-                      {inst.status === "running" && (
-                        <span className="inline-flex items-center gap-1.5 text-emerald-500 font-bold font-mono">
-                          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                          RUNNING
+                {instances.map((inst) => {
+                  const cost = getInstanceCost(inst);
+                  const rev = getInstanceRevenue(inst);
+                  return (
+                    <tr key={inst.id} className="hover:bg-paper/30 transition-colors">
+                      <td className="py-4 px-5 whitespace-nowrap">
+                        {inst.status === "running" && (
+                          <span className="inline-flex items-center gap-1.5 text-emerald-500 font-bold font-mono">
+                            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                            RUNNING
+                          </span>
+                        )}
+                        {inst.status === "provisioning" && (
+                          <span className="inline-flex items-center gap-1.5 text-amber-500 font-bold font-mono">
+                            <span className="h-2 w-2 rounded-full bg-amber-500 animate-spin"></span>
+                            BOOTSTRAP...
+                          </span>
+                        )}
+                        {inst.status === "error" && (
+                          <span className="inline-flex items-center gap-1.5 text-danger font-bold font-mono">
+                            <span className="h-2 w-2 rounded-full bg-danger"></span>
+                            ERROR
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="py-4 px-4 font-medium text-ink">
+                        <div className="font-bold text-sm text-ink">{inst.name}</div>
+                        <div className="text-[11px] text-ink-soft font-mono">Mandant: {inst.tenant_id}</div>
+                      </td>
+
+                      <td className="py-4 px-4">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-paper border border-line">
+                          {inst.type === "gcp_vm" ? `🏢 GCP VM (${inst.machine_type || "e2-std-4"})` : "🐳 Docker Stack"}
                         </span>
-                      )}
-                      {inst.status === "provisioning" && (
-                        <span className="inline-flex items-center gap-1.5 text-amber-500 font-bold font-mono">
-                          <span className="h-2 w-2 rounded-full bg-amber-500 animate-spin"></span>
-                          BOOTSTRAP...
-                        </span>
-                      )}
-                      {inst.status === "error" && (
-                        <span className="inline-flex items-center gap-1.5 text-danger font-bold font-mono">
-                          <span className="h-2 w-2 rounded-full bg-danger"></span>
-                          ERROR
-                        </span>
-                      )}
-                    </td>
+                        <div className="text-[10px] text-ink-soft mt-0.5 capitalize">{inst.plan} Plan</div>
+                      </td>
 
-                    <td className="py-4 px-4 font-medium text-ink">
-                      <div className="font-bold text-sm text-ink">{inst.name}</div>
-                      <div className="text-[11px] text-ink-soft font-mono">Mandant: {inst.tenant_id}</div>
-                    </td>
+                      <td className="py-4 px-4 font-mono text-[11px]">
+                        <div className="text-amber-500">
+                          Kosten: {cost > 0 ? `-${cost.toFixed(0)} €` : "0 € (Self-Hosted)"}
+                        </div>
+                        <div className="text-emerald-500">
+                          Erlös: +{rev.toFixed(0)} €
+                        </div>
+                      </td>
 
-                    <td className="py-4 px-4">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-paper border border-line">
-                        {inst.type === "gcp_vm" ? "🏢 GCP VM" : "🐳 Docker Stack"}
-                      </span>
-                      <div className="text-[10px] text-ink-soft mt-0.5 capitalize">{inst.plan} Plan</div>
-                    </td>
+                      <td className="py-4 px-4 font-mono text-[11px]">
+                        {inst.endpoint_url ? (
+                          <span className="text-ink">{inst.endpoint_url}</span>
+                        ) : (
+                          <span className="text-ink-soft italic">Wird zugewiesen...</span>
+                        )}
+                      </td>
 
-                    <td className="py-4 px-4 font-mono text-[11px]">
-                      {inst.endpoint_url ? (
-                        <span className="text-ink">{inst.endpoint_url}</span>
-                      ) : (
-                        <span className="text-ink-soft italic">Wird zugewiesen...</span>
-                      )}
-                    </td>
+                      <td className="py-4 px-4 text-center">
+                        {inst.endpoint_url ? (
+                          <a
+                            href={inst.endpoint_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 btn-primary text-xs py-1.5 px-3 rounded-lg shadow-sm"
+                          >
+                            <span>🚀 Öffnen</span>
+                            <IconExternalLink size={13} />
+                          </a>
+                        ) : (
+                          <span className="text-ink-soft text-[11px]">In Vorbereitung</span>
+                        )}
+                      </td>
 
-                    <td className="py-4 px-4 text-center">
-                      {inst.endpoint_url ? (
-                        <a
-                          href={inst.endpoint_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 btn-primary text-xs py-1.5 px-3 rounded-lg shadow-sm"
+                      <td className="py-4 px-5 text-right whitespace-nowrap space-x-2">
+                        <button
+                          type="button"
+                          onClick={() => openLogsModal(inst.id)}
+                          className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1"
+                          title="Logs ansehen"
                         >
-                          <span>🚀 Öffnen</span>
-                          <IconExternalLink size={13} />
-                        </a>
-                      ) : (
-                        <span className="text-ink-soft text-[11px]">In Vorbereitung</span>
-                      )}
-                    </td>
+                          <IconTerminal2 size={13} /> Logs
+                        </button>
 
-                    <td className="py-4 px-5 text-right whitespace-nowrap space-x-2">
-                      <button
-                        type="button"
-                        onClick={() => openLogsModal(inst.id)}
-                        className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1"
-                        title="Logs ansehen"
-                      >
-                        <IconTerminal2 size={13} /> Logs
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(inst.id, inst.name)}
-                        className="text-danger hover:underline text-xs py-1.5 px-2 inline-flex items-center gap-1"
-                        title="Instanz löschen"
-                      >
-                        <IconTrash size={13} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(inst.id, inst.name)}
+                          className="text-danger hover:underline text-xs py-1.5 px-2 inline-flex items-center gap-1"
+                          title="Instanz löschen"
+                        >
+                          <IconTrash size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
