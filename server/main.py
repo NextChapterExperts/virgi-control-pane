@@ -152,6 +152,32 @@ def api_health():
 @app.get("/v1/instances")
 def api_list_instances():
     instances = list_instances()
+    # Automatische Synchronisation der aktuellen GCP VM IPs
+    for inst in instances:
+        if inst.get("type") == "gcp_vm" and inst.get("status") in ["running", "stopped"]:
+            try:
+                vm_name = f"virki-{inst['tenant_id']}"[:63].rstrip("-")
+                res = subprocess.run(
+                    ["/opt/google-cloud-sdk/bin/gcloud", "compute", "instances", "describe", vm_name, "--format=json"],
+                    capture_output=True, text=True, timeout=3
+                )
+                if res.returncode == 0:
+                    info = json.loads(res.stdout)
+                    status_gcp = info.get("status", "").lower()
+                    nat_ip = None
+                    for iface in info.get("networkInterfaces", []):
+                        for access in iface.get("accessConfigs", []):
+                            if "natIP" in access:
+                                nat_ip = access["natIP"]
+                                break
+                    if nat_ip and f"http://{nat_ip}:8190" != inst.get("endpoint_url"):
+                        new_status = "running" if status_gcp == "running" else "stopped"
+                        update_instance_status(inst["id"], new_status, endpoint_url=f"http://{nat_ip}:8190", backend_url=f"http://{nat_ip}:8191")
+                        inst["endpoint_url"] = f"http://{nat_ip}:8190"
+                        inst["backend_url"] = f"http://{nat_ip}:8191"
+                        inst["status"] = new_status
+            except Exception:
+                pass
     return {"status": "ok", "count": len(instances), "instances": instances}
 
 
