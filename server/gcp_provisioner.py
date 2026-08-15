@@ -224,7 +224,7 @@ echo "=== VIRKI Appliance erfolgreich gestartet und Autostart registriert (Port 
             "--boot-disk-size=50GB",
             "--boot-disk-type=pd-balanced",
             "--tags=http-server,https-server,virki-appliance",
-            f"--labels=virki_tenant={sanitized},managed_by=virki_control_plane",
+            f"--labels=virki_tenant={clean_tenant.replace('-', '_')},managed_by=virki_control_plane",
             f"--metadata=startup-script={startup_script}",
             "--format=json",
         ]
