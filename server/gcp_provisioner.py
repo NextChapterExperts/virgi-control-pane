@@ -27,11 +27,26 @@ DEFAULT_ZONE = os.environ.get("GCP_ZONE", "europe-west3-a")
 DEFAULT_REGION = os.environ.get("GCP_REGION", "europe-west3")
 DEFAULT_MACHINE_TYPE = os.environ.get("GCP_MACHINE_TYPE", "e2-standard-4")
 
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
-if GITHUB_TOKEN:
-    DIST_REPO_URL = f"https://x-access-token:{GITHUB_TOKEN}@github.com/NextChapterExperts/virgi-platform-dist.git"
-else:
-    DIST_REPO_URL = "https://github.com/NextChapterExperts/virgi-platform-dist.git"
+
+def _get_dist_repo_url() -> str:
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if not token:
+        for env_file in [
+            Path("/app/deploy/docker/.env"),
+            Path(__file__).resolve().parent.parent / "deploy" / "docker" / ".env",
+            Path(__file__).resolve().parent.parent / ".env",
+        ]:
+            if env_file.exists():
+                for line in env_file.read_text().splitlines():
+                    if line.startswith("GITHUB_TOKEN="):
+                        token = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        break
+            if token:
+                break
+
+    if token:
+        return f"https://x-access-token:{token}@github.com/NextChapterExperts/virgi-platform-dist.git"
+    return "https://github.com/NextChapterExperts/virgi-platform-dist.git"
 
 
 def _run_gcloud(args: List[str]) -> Any:
@@ -90,9 +105,12 @@ def _provision_gcp_vm_worker(
     sanitized = re.sub(r"[^a-z0-9\-]", "", tenant_id.lower().replace("_", "-"))
     vm_name = f"virki-{sanitized}"
     
+    dist_repo_url = _get_dist_repo_url()
+    
     append_log(instance_id, f"🚀 Starte GCP Compute VM Provisionierung für Mandant '{tenant_id}' ({company_name})...")
     append_log(instance_id, f"📍 Zone: {zone} · Maschinentyp: {machine_type} · Projekt: {project}")
 
+    # Startup-Script: Klont virgi-platform-dist:main, richtet systemd Autostart ein und startet Docker-Stack
     startup_script = f"""#!/bin/bash
 set -e
 exec > >(tee -a /var/log/virki-startup.log) 2>&1
@@ -103,7 +121,7 @@ systemctl enable --now docker
 mkdir -p /opt/virki
 cd /opt/virki
 if [ ! -d "app" ]; then
-    git clone --branch main {DIST_REPO_URL} app
+    git clone --branch main {dist_repo_url} app
 fi
 cd app/deploy/docker
 
@@ -225,6 +243,7 @@ def _provision_gcp_cloud_run_worker(
     instance_dir = Path("/tmp/virki_instances") / tenant_id
     repo_dir = instance_dir / "repo"
 
+    dist_repo_url = _get_dist_repo_url()
     append_log(instance_id, f"☁️ Starte Google Cloud Run Container Bereitstellung für Mandant '{tenant_id}' ({company_name})...")
     append_log(instance_id, f"📍 Region: {region} · Projekt: {project} · Service: {service_name}")
 
@@ -234,7 +253,7 @@ def _provision_gcp_cloud_run_worker(
         if not (repo_dir / ".git").exists():
             append_log(instance_id, "📥 Klone virgi-platform-dist Repository...")
             subprocess.run(
-                ["git", "clone", "--branch", "main", DIST_REPO_URL, str(repo_dir)],
+                ["git", "clone", "--branch", "main", dist_repo_url, str(repo_dir)],
                 check=True,
                 capture_output=True,
                 text=True,

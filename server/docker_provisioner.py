@@ -18,11 +18,26 @@ from .db import append_log, update_instance_status
 
 log = logging.getLogger("docker_provisioner")
 
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
-if GITHUB_TOKEN:
-    DIST_REPO_URL = f"https://x-access-token:{GITHUB_TOKEN}@github.com/NextChapterExperts/virgi-platform-dist.git"
-else:
-    DIST_REPO_URL = "https://github.com/NextChapterExperts/virgi-platform-dist.git"
+
+def _get_dist_repo_url() -> str:
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if not token:
+        for env_file in [
+            Path("/app/deploy/docker/.env"),
+            Path(__file__).resolve().parent.parent / "deploy" / "docker" / ".env",
+            Path(__file__).resolve().parent.parent / ".env",
+        ]:
+            if env_file.exists():
+                for line in env_file.read_text().splitlines():
+                    if line.startswith("GITHUB_TOKEN="):
+                        token = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        break
+            if token:
+                break
+
+    if token:
+        return f"https://x-access-token:{token}@github.com/NextChapterExperts/virgi-platform-dist.git"
+    return "https://github.com/NextChapterExperts/virgi-platform-dist.git"
 
 
 def generate_install_script(
@@ -32,6 +47,7 @@ def generate_install_script(
     api_port: int = 8191,
 ) -> str:
     """Generiert ein 1-Zeilen Bash Auto-Install Script für den Kunden-Server."""
+    dist_repo_url = _get_dist_repo_url()
     return f"""#!/bin/bash
 set -e
 
@@ -49,7 +65,7 @@ cd "$INSTALL_DIR"
 
 if [ ! -d "repo" ]; then
     echo "📂 Klone VIRKI Appliance Repository..."
-    git clone --branch main {DIST_REPO_URL} repo
+    git clone --branch main {dist_repo_url} repo
 else
     echo "🔄 Aktualisiere Repository..."
     cd repo && git pull origin main && cd ..
@@ -136,8 +152,9 @@ def _provision_local_docker_stack_worker(
     try:
         append_log(instance_id, f"📂 Synchronisiere virgi-platform-dist (Branch: main)...")
         repo_dir = target_dir / "repo"
+        dist_repo_url = _get_dist_repo_url()
         if not (repo_dir / ".git").exists():
-            subprocess.run(["git", "clone", "--branch", "main", DIST_REPO_URL, str(repo_dir)], check=True, capture_output=True, text=True)
+            subprocess.run(["git", "clone", "--branch", "main", dist_repo_url, str(repo_dir)], check=True, capture_output=True, text=True)
         else:
             subprocess.run(["git", "fetch"], cwd=str(repo_dir), check=True)
             subprocess.run(["git", "checkout", "main"], cwd=str(repo_dir), check=True)
