@@ -37,6 +37,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 export default function ControlPlaneCockpit() {
   const [instances, setInstances] = useState<Instance[]>([]);
   const [loading, setLoading] = useState(true);
+  const [now, setNow] = useState(Date.now());
   
   // Live Log Streaming & Auto-Close / Keep-Open states
   const [selectedLogsId, setSelectedLogsId] = useState<string | null>(null);
@@ -58,7 +59,11 @@ export default function ControlPlaneCockpit() {
   useEffect(() => {
     loadInstances();
     const interval = setInterval(loadInstances, 4000);
-    return () => clearInterval(interval);
+    const clock = setInterval(() => setNow(Date.now()), 2000);
+    return () => {
+      clearInterval(interval);
+      clearInterval(clock);
+    };
   }, []);
 
   // Live polling for selected logs
@@ -240,24 +245,56 @@ export default function ControlPlaneCockpit() {
     setTimeout(() => setCopied(false), 2500);
   };
 
-  // Kosten-Berechnung (GCP vs. On-Premise)
-  const calculateCost = (inst: Instance) => {
+  // Berechnung der tatsächlichen Ist-Kosten (Bisher aufgelaufen)
+  const calculateActualCost = (inst: Instance) => {
+    const createdAtMs = (inst.created_at || (Date.now() / 1000 - 3600)) * 1000;
+    const runtimeHours = Math.max(0.01, (now - createdAtMs) / (1000 * 3600));
+
     if (inst.type === "docker_stack") {
-      return { monthly: "0,00 €", hourly: "0,00 €", detail: "On-Prem / Lokal" };
+      return {
+        costVal: 0,
+        costStr: "0,00 €",
+        rateVal: 0,
+        rateStr: "0,00 € / Std.",
+        runtimeStr: `${runtimeHours.toFixed(1)} Std.`,
+        detail: "Lokal / On-Premise",
+      };
     }
+
     if (inst.type === "gcp_cloud_run") {
-      if (inst.status === "stopped") {
-        return { monthly: "0,00 €", hourly: "0,00 €", detail: "Serverless (Pausiert)" };
-      }
-      return { monthly: "~ 15–35 €", hourly: "~ 0,02 €", detail: "Serverless (Pay-as-you-go)" };
+      const rate = inst.status === "running" ? 0.02 : 0.00;
+      const cost = 0.01 + runtimeHours * rate;
+      return {
+        costVal: cost,
+        costStr: `${cost.toFixed(2)} €`,
+        rateVal: rate,
+        rateStr: inst.status === "running" ? "~ 0,02 € / Std." : "0,00 € (Pausiert)",
+        runtimeStr: `${runtimeHours.toFixed(1)} Std.`,
+        detail: "Serverless Pay-per-Request",
+      };
     }
+
     if (inst.type === "gcp_vm") {
-      if (inst.status === "stopped") {
-        return { monthly: "~ 4,50 €", hourly: "~ 0,006 €", detail: "Nur Disk (VM gestoppt)" };
-      }
-      return { monthly: "~ 112,50 €", hourly: "~ 0,154 €", detail: "e2-std-4 (24/7 Compute)" };
+      const rate = inst.status === "running" ? 0.154 : 0.006;
+      const cost = runtimeHours * rate;
+      return {
+        costVal: cost,
+        costStr: `${cost.toFixed(2)} €`,
+        rateVal: rate,
+        rateStr: inst.status === "running" ? "0,154 € / Std." : "0,006 € / Std. (Disk)",
+        runtimeStr: `${runtimeHours.toFixed(1)} Std.`,
+        detail: inst.status === "running" ? "e2-std-4 (24/7 Compute)" : "VM pausiert (nur SSD)",
+      };
     }
-    return { monthly: "0,00 €", hourly: "0,00 €", detail: "Unbekannt" };
+
+    return {
+      costVal: 0,
+      costStr: "0,00 €",
+      rateVal: 0,
+      rateStr: "0,00 € / Std.",
+      runtimeStr: "-",
+      detail: "",
+    };
   };
 
   // Metriken & Aggregierte Kosten
@@ -266,15 +303,9 @@ export default function ControlPlaneCockpit() {
   const gcpRunCount = instances.filter((i) => i.type === "gcp_cloud_run").length;
   const gcpVmCount = instances.filter((i) => i.type === "gcp_vm").length;
 
-  const totalMonthlyCloudCost = instances.reduce((sum, inst) => {
-    if (inst.type === "gcp_vm") {
-      return sum + (inst.status === "stopped" ? 4.50 : 112.50);
-    }
-    if (inst.type === "gcp_cloud_run") {
-      return sum + (inst.status === "stopped" ? 0 : 25.00);
-    }
-    return sum;
-  }, 0);
+  // Gesamte tatsächlich aufgelaufene Kosten und aktueller Stundensatz
+  const totalAccumulatedCost = instances.reduce((sum, inst) => sum + calculateActualCost(inst).costVal, 0);
+  const totalCurrentRate = instances.reduce((sum, inst) => sum + calculateActualCost(inst).rateVal, 0);
 
   return (
     <div className="space-y-8 pb-32">
@@ -287,7 +318,7 @@ export default function ControlPlaneCockpit() {
               VIRKI Control Plane
             </h1>
             <p className="text-xs sm:text-sm text-ink-soft mt-1">
-              Betreiber-Cockpit: Appliances lokal, als Google Cloud Container oder als Dedicated VM bereitstellen und Kosten überwachen.
+              Betreiber-Cockpit: Appliances lokal, als Google Cloud Container oder als Dedicated VM bereitstellen und Ist-Kosten überwachen.
             </p>
           </div>
 
@@ -310,7 +341,7 @@ export default function ControlPlaneCockpit() {
           </div>
         </div>
 
-        {/* 5 Schlanke Metrik-Karten inkl. GCP Kosten */}
+        {/* 5 Schlanke Metrik-Karten inkl. Ist-Kosten */}
         <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
           <div className="bg-card border border-line p-5 rounded-2xl">
             <span className="text-xs text-ink-soft uppercase font-bold tracking-wider">Laufende Instanzen</span>
@@ -352,17 +383,20 @@ export default function ControlPlaneCockpit() {
 
           <div className="bg-card border border-line p-5 rounded-2xl bg-gradient-to-br from-card to-paper/80">
             <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1.5">
-              <IconCoin size={14} className="text-emerald-400" /> GCP Cloud-Kosten
+              <IconCoin size={14} className="text-emerald-400" /> Aktuelle GCP-Kosten
             </span>
             <div className="text-2xl sm:text-3xl font-black text-emerald-400 mt-2 font-mono flex items-baseline gap-1.5">
-              <span>~{totalMonthlyCloudCost.toFixed(2)} €</span>
-              <span className="text-[11px] text-ink-soft font-normal">/ Mo.</span>
+              <span>{totalAccumulatedCost.toFixed(2)} €</span>
+              <span className="text-[10px] text-ink-soft font-normal font-sans">bisher</span>
+            </div>
+            <div className="text-[10px] text-ink-soft font-mono mt-1">
+              Rate: {totalCurrentRate.toFixed(3)} € / Std.
             </div>
           </div>
         </div>
       </div>
 
-      {/* Bereitstellungs-Wizard mit 3 Optionen inkl. Kostentransparenz */}
+      {/* Bereitstellungs-Wizard mit 3 Optionen */}
       {showForm && (
         <div className="bg-card border-2 border-signal/40 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6 animate-fade-in">
           <div className="flex items-center justify-between border-b border-line pb-4">
@@ -399,10 +433,10 @@ export default function ControlPlaneCockpit() {
               />
             </div>
 
-            {/* 3 Bereitstellungsziele mit Kosten */}
+            {/* 3 Bereitstellungsziele mit Ist-Tarifen */}
             <div>
               <label className="block text-xs font-bold text-ink-soft uppercase tracking-wider mb-2">
-                Bereitstellungsziel & Laufende Infrastruktur-Kosten
+                Bereitstellungsziel & Laufende Tarife
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <button
@@ -426,8 +460,8 @@ export default function ControlPlaneCockpit() {
                     </p>
                   </div>
                   <div className="pt-2 border-t border-line/50 flex items-center justify-between">
-                    <span className="text-[11px] text-ink-soft">Infrastruktur:</span>
-                    <span className="text-xs font-bold font-mono text-emerald-400">0,00 € / Monat</span>
+                    <span className="text-[11px] text-ink-soft">Tarif:</span>
+                    <span className="text-xs font-bold font-mono text-emerald-400">0,00 € (Kostenlos)</span>
                   </div>
                 </button>
 
@@ -452,8 +486,8 @@ export default function ControlPlaneCockpit() {
                     </p>
                   </div>
                   <div className="pt-2 border-t border-line/50 flex items-center justify-between">
-                    <span className="text-[11px] text-ink-soft">Infrastruktur:</span>
-                    <span className="text-xs font-bold font-mono text-sky-400">~ 15 – 35 € / Mo.</span>
+                    <span className="text-[11px] text-ink-soft">Tarif:</span>
+                    <span className="text-xs font-bold font-mono text-sky-400">~ 0,02 € / Std.</span>
                   </div>
                 </button>
 
@@ -478,8 +512,8 @@ export default function ControlPlaneCockpit() {
                     </p>
                   </div>
                   <div className="pt-2 border-t border-line/50 flex items-center justify-between">
-                    <span className="text-[11px] text-ink-soft">Infrastruktur:</span>
-                    <span className="text-xs font-bold font-mono text-signal">~ 112,50 € / Mo.</span>
+                    <span className="text-[11px] text-ink-soft">Tarif:</span>
+                    <span className="text-xs font-bold font-mono text-signal">0,154 € / Std.</span>
                   </div>
                 </button>
               </div>
@@ -510,7 +544,7 @@ export default function ControlPlaneCockpit() {
       <div className="bg-card border border-line rounded-2xl overflow-hidden shadow-sm">
         <div className="p-5 border-b border-line flex items-center justify-between">
           <h2 className="font-bold text-sm text-ink">Verwaltete Kunden-Appliances</h2>
-          <span className="text-xs text-ink-soft font-mono">Live-Status & Kostenkontrolle</span>
+          <span className="text-xs text-ink-soft font-mono">Live-Status & Aktuelle Kosten</span>
         </div>
 
         {loading && instances.length === 0 ? (
@@ -540,7 +574,7 @@ export default function ControlPlaneCockpit() {
                   <th className="py-3 px-5">Status</th>
                   <th className="py-3 px-4">Mandant / Name</th>
                   <th className="py-3 px-4">Bereitstellung</th>
-                  <th className="py-3 px-4">Laufende Kosten (GCP)</th>
+                  <th className="py-3 px-4">Aktuelle Kosten (Bisher)</th>
                   <th className="py-3 px-4">Endpunkt URL</th>
                   <th className="py-3 px-4 text-center">Appliance Öffnen</th>
                   <th className="py-3 px-5 text-right">Steuerung & Aktionen</th>
@@ -548,7 +582,7 @@ export default function ControlPlaneCockpit() {
               </thead>
               <tbody className="divide-y divide-line/60">
                 {instances.map((inst) => {
-                  const cost = calculateCost(inst);
+                  const cost = calculateActualCost(inst);
                   return (
                     <tr key={inst.id} className="hover:bg-paper/30 transition-colors">
                       <td className="py-4 px-5 whitespace-nowrap">
@@ -591,13 +625,13 @@ export default function ControlPlaneCockpit() {
                         </span>
                       </td>
 
-                      {/* Laufende Kosten */}
+                      {/* Aktuelle Kosten (Bisher aufgelaufen) */}
                       <td className="py-4 px-4 whitespace-nowrap">
-                        <div className="font-mono font-bold text-ink text-xs flex items-baseline gap-1">
-                          <span>{cost.monthly}</span>
-                          <span className="text-[10px] text-ink-soft font-normal">/ Mo.</span>
+                        <div className="font-mono font-bold text-emerald-400 text-xs flex items-baseline gap-1">
+                          <span>{cost.costStr}</span>
+                          <span className="text-[10px] text-ink-soft font-normal font-sans">bisher</span>
                         </div>
-                        <div className="text-[10px] text-ink-soft font-mono">{cost.detail}</div>
+                        <div className="text-[10px] text-ink-soft font-mono">{cost.rateStr} · {cost.runtimeStr}</div>
                       </td>
 
                       <td className="py-4 px-4 font-mono text-[11px]">
