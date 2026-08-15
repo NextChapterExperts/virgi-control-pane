@@ -21,6 +21,7 @@ services:
       - /tmp/virki_instances:/tmp/virki_instances
       - /home/peter/.config/gcloud:/root/.config/gcloud
       - /home/peter/.local/share/google-cloud-sdk:/opt/google-cloud-sdk:ro
+      - /home/peter/Projekte/1110-AI-OS-Core-Platform:/platform-dist:ro
     networks:
       - virki-net
 

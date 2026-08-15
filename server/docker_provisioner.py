@@ -19,7 +19,10 @@ from .db import append_log, update_instance_status
 log = logging.getLogger("docker_provisioner")
 
 
+import shutil
+
 def _get_dist_repo_url() -> str:
+    """Ermittelt dynamisch die GitHub Clone URL mit Token (aus Env oder .env)."""
     token = os.environ.get("GITHUB_TOKEN", "").strip()
     if not token:
         for env_file in [
@@ -38,6 +41,38 @@ def _get_dist_repo_url() -> str:
     if token:
         return f"https://x-access-token:{token}@github.com/NextChapterExperts/virgi-platform-dist.git"
     return "https://github.com/NextChapterExperts/virgi-platform-dist.git"
+
+
+def _sync_platform_repo(repo_dir: Path, instance_id: str) -> None:
+    """Synchronisiert das Platform-Repository bevorzugt aus dem lokalen Release-Mirror oder via Git."""
+    local_source = Path("/platform-dist")
+    if not local_source.exists():
+        for p in [Path("/home/peter/Projekte/1110-AI-OS-Core-Platform"), Path.cwd().parent / "1110-AI-OS-Core-Platform"]:
+            if p.exists():
+                local_source = p
+                break
+    
+    if local_source.exists() and (local_source / "core").exists():
+        append_log(instance_id, f"📥 Synchronisiere Plattform-Core aus lokalem Release-Mirror ({local_source})...")
+        if repo_dir.exists():
+            shutil.rmtree(repo_dir, ignore_errors=True)
+        shutil.copytree(
+            local_source,
+            repo_dir,
+            ignore=shutil.ignore_patterns(".venv", "venv", ".next", "node_modules", ".pytest_cache", "data", "*.log"),
+            symlinks=False,
+        )
+        append_log(instance_id, "✓ Lokaler Release-Mirror erfolgreich synchronisiert.")
+        return
+
+    # Remote Fallback
+    append_log(instance_id, "📥 Klone virgi-platform-dist aus GitHub...")
+    dist_repo_url = _get_dist_repo_url()
+    if not (repo_dir / ".git").exists():
+        subprocess.run(["git", "clone", "--branch", "main", dist_repo_url, str(repo_dir)], check=True, capture_output=True, text=True)
+    else:
+        subprocess.run(["git", "-C", str(repo_dir), "pull", "origin", "main"], check=True, capture_output=True, text=True)
+    append_log(instance_id, "✓ GitHub Repository erfolgreich synchronisiert.")
 
 
 def generate_install_script(
@@ -150,17 +185,8 @@ def _provision_local_docker_stack_worker(
         target_dir.mkdir(parents=True, exist_ok=True)
     
     try:
-        append_log(instance_id, f"📂 Synchronisiere virgi-platform-dist (Branch: main)...")
         repo_dir = target_dir / "repo"
-        dist_repo_url = _get_dist_repo_url()
-        if not (repo_dir / ".git").exists():
-            subprocess.run(["git", "clone", "--branch", "main", dist_repo_url, str(repo_dir)], check=True, capture_output=True, text=True)
-        else:
-            subprocess.run(["git", "fetch"], cwd=str(repo_dir), check=True)
-            subprocess.run(["git", "checkout", "main"], cwd=str(repo_dir), check=True)
-            subprocess.run(["git", "pull", "origin", "main"], cwd=str(repo_dir), check=True)
-            
-        append_log(instance_id, "✓ Repository erfolgreich synchronisiert.")
+        _sync_platform_repo(repo_dir, instance_id)
 
         docker_dir = repo_dir / "deploy" / "docker"
         append_log(instance_id, f"⚙️ Generiere Docker-Compose Konfiguration (Web: {web_port}, API: {api_port})...")
