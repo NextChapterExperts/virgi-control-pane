@@ -82,7 +82,7 @@ def _provision_gcp_vm_worker(
     append_log(instance_id, f"🚀 Starte GCP Compute VM Provisionierung für Mandant '{tenant_id}' ({company_name})...")
     append_log(instance_id, f"📍 Zone: {zone} · Maschinentyp: {machine_type} · Projekt: {project}")
 
-    # Startup-Script: Klont virgi-platform-dist:main und startet Docker-Stack
+    # Startup-Script: Klont virgi-platform-dist:main, richtet systemd Autostart ein und startet Docker-Stack
     startup_script = f"""#!/bin/bash
 set -e
 exec > >(tee -a /var/log/virki-startup.log) 2>&1
@@ -103,8 +103,30 @@ AIOS_COMPANY_NAME="{company_name}"
 AIOS_ADMIN_EMAIL="{admin_email}"
 ENVEOF
 
+# Systemd Autostart-Service für jeden VM-Start / Reboot einrichten
+cat << 'SERVICE_EOF' > /etc/systemd/system/virki-appliance.service
+[Unit]
+Description=VIRKI AI-OS Core Appliance Docker Stack
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/virki/app/deploy/docker
+ExecStart=/usr/bin/docker compose up -d
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+
+systemctl daemon-reload
+systemctl enable virki-appliance.service
+
 docker compose up -d --build
-echo "=== VIRKI Appliance erfolgreich gestartet auf Port 8090/8091 ==="
+echo "=== VIRKI Appliance erfolgreich gestartet und Autostart registriert (Port 8090/8091) ==="
 """
 
     try:

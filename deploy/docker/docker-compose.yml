@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  control-plane-backend:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.backend
+    container_name: virki-control-plane-backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - GCP_PROJECT=${GCP_PROJECT:-strong-zephyr-505611-k4}
+      - GCP_ZONE=${GCP_ZONE:-europe-west3-a}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - control-plane-data:/app/data
+    networks:
+      - virki-net
+
+  control-plane-web:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.web
+    container_name: virki-control-plane-web
+    restart: unless-stopped
+    ports:
+      - "8280:8280"
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+    depends_on:
+      - control-plane-backend
+    networks:
+      - virki-net
+
+volumes:
+  control-plane-data:
+
+networks:
+  virki-net:
+    driver: bridge
