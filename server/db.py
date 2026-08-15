@@ -32,7 +32,6 @@ def init_db() -> None:
                 backend_url TEXT NOT NULL,   -- z.B. http://34.123.45.67:8091
                 zone TEXT DEFAULT '',
                 machine_type TEXT DEFAULT '',
-                plan TEXT DEFAULT 'sovereign', -- 'sovereign' | 'managed' | 'enterprise'
                 git_repo TEXT NOT NULL,
                 git_branch TEXT NOT NULL,
                 created_at REAL NOT NULL,
@@ -65,7 +64,6 @@ def create_instance(
     backend_url: str = "",
     zone: str = "",
     machine_type: str = "",
-    plan: str = "sovereign",
     git_repo: str = "https://github.com/NextChapterExperts/virgi-platform-dist.git",
     git_branch: str = "main",
     metadata: Optional[Dict[str, Any]] = None,
@@ -77,8 +75,8 @@ def create_instance(
             """
             INSERT INTO instances (
                 id, tenant_id, name, type, status, endpoint_url, backend_url,
-                zone, machine_type, plan, git_repo, git_branch, created_at, updated_at, metadata_json
-            ) VALUES (?, ?, ?, ?, 'provisioning', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                zone, machine_type, git_repo, git_branch, created_at, updated_at, metadata_json
+            ) VALUES (?, ?, ?, ?, 'provisioning', ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 instance_id,
@@ -89,7 +87,6 @@ def create_instance(
                 backend_url,
                 zone,
                 machine_type,
-                plan,
                 git_repo,
                 git_branch,
                 now,

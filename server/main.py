@@ -1,11 +1,20 @@
-"""main.py — FastAPI REST Backend für die VIRKI Control Plane."""
+"""main.py — FastAPI Backend für die VIRKI Control Plane.
+
+Bietet REST-APIs für Flotten-Management, automatische Provisionierung (Lokal Docker / GCP VM),
+Live-Log-Streaming und Installationsskript-Generierung.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import os
+import socket
 import uuid
-from typing import Any, Dict, Optional
-from fastapi import FastAPI, HTTPException, Request, Response
+from typing import Any, Dict, List, Literal, Optional
+
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -27,15 +36,14 @@ from .gcp_provisioner import (
     provision_gcp_vm_async,
     delete_gcp_vm,
 )
-from .stripe_billing import (
-    list_plans,
-    create_checkout_session,
-)
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("control_plane_api")
 
 app = FastAPI(
-    title="VIRKI Control Plane & Fleet Hub API",
+    title="VIRKI Control Plane API",
+    description="Flotten-Management und Provisionierungs-Engine für VIRKI AI-OS Appliances",
     version="1.0.0",
-    description="SaaS Management, Provisioning & Billing für VIRKI AI-OS Appliances",
 )
 
 app.add_middleware(
@@ -48,46 +56,30 @@ app.add_middleware(
 
 
 @app.on_event("startup")
-def startup_event():
+def on_startup():
     init_db()
+    log.info("VIRKI Control Plane DB initialisiert.")
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok", "service": "virki_control_plane", "version": "1.0.0"}
-
-
-# ==============================================================================
-# Instanzen- & Flotten-Management
-# ==============================================================================
+# -----------------------------------------------------------------------------
+# Pydantic Modelle
+# -----------------------------------------------------------------------------
 
 class ProvisionRequest(BaseModel):
-    tenant_id: str
-    company_name: str
-    admin_email: str
-    type: str = "docker_stack"  # "gcp_vm" | "docker_stack"
-    plan: str = "sovereign"
-    zone: str = "europe-west3-a"
-    machine_type: str = "e2-standard-4"
-    web_port: int = 8190
-    api_port: int = 8191
+    tenant_id: str = Field(..., description="Eindeutige Mandanten-ID, z.B. schulze-bedachungen")
+    company_name: str = Field(..., description="Firmenname für das Unternehmensprofil")
+    type: Literal["docker_stack", "gcp_vm"] = Field(
+        "docker_stack", description="Bereitstellungsziel: docker_stack oder gcp_vm"
+    )
+    zone: Optional[str] = Field("europe-west3-a", description="GCP-Zone für Cloud-VMs")
+    machine_type: Optional[str] = Field("e2-standard-4", description="GCP-Maschinentyp")
+    web_port: Optional[int] = Field(8190, description="Web-Port bei lokalem Docker-Stack")
+    api_port: Optional[int] = Field(8191, description="API-Port bei lokalem Docker-Stack")
 
 
-@app.get("/v1/instances")
-def api_list_instances():
-    return {"status": "ok", "instances": list_instances()}
-
-
-@app.get("/v1/instances/{instance_id}")
-def api_get_instance(instance_id: str):
-    inst = get_instance(instance_id)
-    if not inst:
-        raise HTTPException(status_code=404, detail="Instanz nicht gefunden")
-    return {"status": "ok", "instance": inst}
-
-
-import socket
-
+# -----------------------------------------------------------------------------
+# Hilfsfunktionen
+# -----------------------------------------------------------------------------
 
 def _is_port_in_use(port: int) -> bool:
     try:
@@ -106,51 +98,76 @@ def _find_free_ports(web_port: int, api_port: int) -> tuple[int, int]:
     return w, a
 
 
+# -----------------------------------------------------------------------------
+# Endpunkte: Flotten- & Instanzen-Verwaltung
+# -----------------------------------------------------------------------------
+
+@app.get("/health")
+def api_health():
+    return {"status": "ok", "service": "virki-control-plane"}
+
+
+@app.get("/v1/instances")
+def api_list_instances():
+    instances = list_instances()
+    return {"status": "ok", "count": len(instances), "instances": instances}
+
+
+@app.get("/v1/instances/{instance_id}")
+def api_get_instance(instance_id: str):
+    inst = get_instance(instance_id)
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instanz nicht gefunden")
+    return {"status": "ok", "instance": inst}
+
+
 @app.post("/v1/instances/provision")
 def api_provision_instance(req: ProvisionRequest):
-    instance_id = f"inst_{req.tenant_id}_{uuid.uuid4().hex[:6]}"
+    clean_tenant = req.tenant_id.lower().replace("_", "-").replace(" ", "-")
+    instance_id = f"inst_{clean_tenant}_{uuid.uuid4().hex[:6]}"
     
     if req.type == "gcp_vm":
-        # Initialisiere DB-Eintrag
+        # Initialisiere DB-Eintrag für Cloud VM
         inst = create_instance(
             instance_id=instance_id,
-            tenant_id=req.tenant_id,
+            tenant_id=clean_tenant,
             name=f"VIRKI Cloud VM ({req.company_name})",
             instance_type="gcp_vm",
             endpoint_url="",
             backend_url="",
-            zone=req.zone,
-            machine_type=req.machine_type,
-            plan=req.plan,
+            zone=req.zone or "europe-west3-a",
+            machine_type=req.machine_type or "e2-standard-4",
         )
-        # Starte GCP Provisionierung im Hintergrund
         provision_gcp_vm_async(
             instance_id=instance_id,
-            tenant_id=req.tenant_id,
+            tenant_id=clean_tenant,
             company_name=req.company_name,
-            admin_email=req.admin_email,
-            zone=req.zone,
-            machine_type=req.machine_type,
+            admin_email="admin@lokal.lan",
+            zone=req.zone or "europe-west3-a",
+            machine_type=req.machine_type or "e2-standard-4",
         )
         return {"status": "ok", "message": "GCP VM Provisionierung gestartet", "instance": inst}
 
     else:
-        # Lokaler oder gemanagter Docker Stack
-        web_port, api_port = _find_free_ports(req.web_port, req.api_port)
+        # Lokaler Docker Stack mit Port-Kollisionsschutz
+        start_web = req.web_port or 8190
+        start_api = req.api_port or 8191
+        web_port, api_port = _find_free_ports(start_web, start_api)
+        
         endpoint_url = f"http://localhost:{web_port}"
         backend_url = f"http://localhost:{api_port}"
+        
         inst = create_instance(
             instance_id=instance_id,
-            tenant_id=req.tenant_id,
+            tenant_id=clean_tenant,
             name=f"VIRKI Docker Appliance ({req.company_name})",
             instance_type="docker_stack",
             endpoint_url=endpoint_url,
             backend_url=backend_url,
-            plan=req.plan,
         )
         provision_local_docker_stack_async(
             instance_id=instance_id,
-            tenant_id=req.tenant_id,
+            tenant_id=clean_tenant,
             company_name=req.company_name,
             web_port=web_port,
             api_port=api_port,
@@ -163,87 +180,59 @@ def api_delete_instance(instance_id: str):
     inst = get_instance(instance_id)
     if not inst:
         raise HTTPException(status_code=404, detail="Instanz nicht gefunden")
-        
+    
+    # Falls es eine GCP VM ist, optional VM über gcloud löschen
     if inst["type"] == "gcp_vm":
         try:
-            sanitized = inst["tenant_id"].lower().replace("_", "-")
-            delete_gcp_vm(f"virki-{sanitized}", zone=inst.get("zone") or "europe-west3-a")
-        except Exception:
-            pass
+            delete_gcp_vm(f"virki-{inst['tenant_id']}", zone=inst.get("zone") or "europe-west3-a")
+        except Exception as exc:
+            log.warning("GCP VM konnte nicht gelöscht werden: %s", exc)
 
     deleted = delete_instance(instance_id)
     return {"status": "ok", "deleted": deleted}
 
 
-# ==============================================================================
-# Live-Log Streaming (SSE)
-# ==============================================================================
+# -----------------------------------------------------------------------------
+# Endpunkte: Logs & Streaming
+# -----------------------------------------------------------------------------
 
 @app.get("/v1/instances/{instance_id}/logs")
-def api_get_logs(instance_id: str, limit: int = 200):
-    return {"status": "ok", "logs": get_logs(instance_id, limit=limit)}
+def api_get_instance_logs(instance_id: str, limit: int = 200):
+    logs = get_logs(instance_id, limit=limit)
+    return {"status": "ok", "count": len(logs), "logs": logs}
 
 
 @app.get("/v1/instances/{instance_id}/logs/stream")
 async def api_stream_logs(instance_id: str):
-    """Server-Sent Events (SSE) Stream für Live-Logs während und nach der Provisionierung."""
-    async def log_generator():
+    """Server-Sent Events (SSE) Live Log Streamer."""
+    async def event_generator():
         last_id = 0
         while True:
-            logs = get_logs(instance_id, limit=500)
-            new_logs = [l for l in logs if l["id"] > last_id]
-            for l in new_logs:
-                last_id = l["id"]
-                yield f"data: {l['level']}: {l['message']}\n\n"
-            await asyncio.sleep(1.0)
+            logs = get_logs(instance_id, limit=100)
+            new_logs = [l for l in logs if l.get("id", 0) > last_id]
+            for entry in new_logs:
+                last_id = max(last_id, entry.get("id", 0))
+                yield f"data: {json.dumps(entry)}\n\n"
+            await asyncio.sleep(2)
 
-    return StreamingResponse(log_generator(), media_type="text/event-stream")
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-# ==============================================================================
-# 1-Line Installer Download
-# ==============================================================================
+# -----------------------------------------------------------------------------
+# Endpunkt: Auto-Installer Generator
+# -----------------------------------------------------------------------------
 
 @app.get("/v1/install/{tenant_id}.sh", response_class=PlainTextResponse)
-def api_get_install_script(tenant_id: str, company: str = "Unternehmen", web_port: int = 8190, api_port: int = 8191):
-    """Gibt das personalisierte Bash-Installationsskript für den Kunden zurück."""
-    return generate_docker_install_script(
+def api_get_install_script(
+    tenant_id: str,
+    company: str = "Kunde",
+    web_port: int = 8190,
+    api_port: int = 8191,
+):
+    script = generate_docker_install_script(
         tenant_id=tenant_id,
         company_name=company,
         web_port=web_port,
         api_port=api_port,
     )
-
-
-# ==============================================================================
-# Abrechnung & Stripe Checkout
-# ==============================================================================
-
-class CheckoutRequest(BaseModel):
-    plan_id: str
-    tenant_id: str
-    company_name: str
-    customer_email: str
-    success_url: str
-    cancel_url: str
-
-
-@app.get("/v1/billing/plans")
-def api_list_plans():
-    return {"status": "ok", "plans": list_plans()}
-
-
-@app.post("/v1/billing/checkout")
-def api_create_checkout(req: CheckoutRequest):
-    try:
-        session = create_checkout_session(
-            plan_id=req.plan_id,
-            tenant_id=req.tenant_id,
-            company_name=req.company_name,
-            customer_email=req.customer_email,
-            success_url=req.success_url,
-            cancel_url=req.cancel_url,
-        )
-        return {"status": "ok", **session}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    return PlainTextResponse(content=script, media_type="text/plain")

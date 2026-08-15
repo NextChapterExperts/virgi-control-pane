@@ -10,8 +10,6 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
-      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
       - GCP_PROJECT=${GCP_PROJECT:-strong-zephyr-505611-k4}
       - GCP_ZONE=${GCP_ZONE:-europe-west3-a}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}

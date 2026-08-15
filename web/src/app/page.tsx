@@ -3,7 +3,6 @@
 import React, { useEffect, useState } from "react";
 import {
   IconServer,
-  IconCpu,
   IconExternalLink,
   IconTrash,
   IconRefresh,
@@ -30,29 +29,22 @@ interface Instance {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
-export default function OperationalCommandCenter() {
+export default function ControlPlaneCockpit() {
   const [instances, setInstances] = useState<Instance[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedLogsId, setSelectedLogsId] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
 
-  // Form states für Provisionierung
-  const [showProvisionForm, setShowProvisionForm] = useState(false);
-  const [tenantId, setTenantId] = useState("");
+  // Form states
+  const [showForm, setShowForm] = useState(false);
   const [companyName, setCompanyName] = useState("");
-  const [adminEmail, setAdminEmail] = useState("");
   const [deployType, setDeployType] = useState<"docker_stack" | "gcp_vm">("docker_stack");
-  const [zone, setZone] = useState("europe-west3-a");
-  const [machineType, setMachineType] = useState("e2-standard-4");
-  const [webPort, setWebPort] = useState(8190);
-  const [apiPort, setApiPort] = useState(8191);
   const [provisioning, setProvisioning] = useState(false);
-  const [oneLineScript, setOneLineScript] = useState<string | null>(null);
 
   useEffect(() => {
     loadInstances();
-    const interval = setInterval(loadInstances, 6000);
+    const interval = setInterval(loadInstances, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -72,23 +64,20 @@ export default function OperationalCommandCenter() {
 
   const handleProvisionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenantId || !companyName) {
-      alert("Bitte Mandanten-ID und Name angeben.");
+    if (!companyName.trim()) {
+      alert("Bitte einen Mandanten- bzw. Firmennamen eingeben.");
       return;
     }
 
     setProvisioning(true);
     try {
+      const tenantId = companyName.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-");
       const payload = {
-        tenant_id: tenantId.toLowerCase().replace(/[^a-z0-9_-]/g, ""),
-        company_name: companyName,
-        admin_email: adminEmail || "admin@lokal.lan",
+        tenant_id: tenantId || "mandant",
+        company_name: companyName.trim(),
         type: deployType,
-        plan: "sovereign",
-        zone: deployType === "gcp_vm" ? zone : "",
-        machine_type: deployType === "gcp_vm" ? machineType : "",
-        web_port: Number(webPort),
-        api_port: Number(apiPort),
+        zone: "europe-west3-a",
+        machine_type: "e2-standard-4",
       };
 
       const res = await fetch(`${API_BASE}/v1/instances/provision`, {
@@ -99,27 +88,14 @@ export default function OperationalCommandCenter() {
 
       if (!res.ok) throw new Error("Fehler beim Starten der Bereitstellung");
       
-      setTenantId("");
       setCompanyName("");
-      setWebPort((prev) => prev + 10);
-      setApiPort((prev) => prev + 10);
-      setShowProvisionForm(false);
+      setShowForm(false);
       loadInstances();
     } catch (err: any) {
       alert(`Fehler: ${err.message}`);
     } finally {
       setProvisioning(false);
     }
-  };
-
-  const handleFetchOneLineInstaller = () => {
-    if (!tenantId) {
-      alert("Bitte zuerst eine Mandanten-ID eingeben.");
-      return;
-    }
-    const cleanTenant = tenantId.toLowerCase().replace(/[^a-z0-9_-]/g, "");
-    const script = `curl -sSL "${API_BASE}/v1/install/${cleanTenant}.sh?company=${encodeURIComponent(companyName || "Kunde")}&web_port=${webPort}&api_port=${apiPort}" | bash`;
-    setOneLineScript(script);
   };
 
   const handleDelete = async (id: string, name: string) => {
@@ -148,14 +124,14 @@ export default function OperationalCommandCenter() {
     }
   };
 
-  // KPIs
+  // Metriken
   const activeCount = instances.filter((i) => i.status === "running").length;
-  const gcpCount = instances.filter((i) => i.type === "gcp_vm").length;
   const dockerCount = instances.filter((i) => i.type === "docker_stack").length;
+  const gcpCount = instances.filter((i) => i.type === "gcp_vm").length;
 
   return (
     <div className="space-y-8">
-      {/* Header & KPI Bar */}
+      {/* Header & Metriken */}
       <div>
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
           <div>
@@ -164,7 +140,7 @@ export default function OperationalCommandCenter() {
               VIRKI Control Plane
             </h1>
             <p className="text-xs sm:text-sm text-ink-soft mt-1">
-              Betreiber-Cockpit: Lokale Docker Stacks & Google Cloud VMs bereitstellen, überwachen und per Direkt-Link verwalten.
+              Betreiber-Leitstand: Kunden-Appliances lokal oder in Google Cloud bereitstellen und verwalten.
             </p>
           </div>
 
@@ -178,34 +154,27 @@ export default function OperationalCommandCenter() {
             </button>
             <button
               type="button"
-              onClick={() => setShowProvisionForm(!showProvisionForm)}
+              onClick={() => setShowForm(!showForm)}
               className="btn-primary text-xs flex items-center gap-1.5 py-2 px-4 shadow-sm"
             >
-              {showProvisionForm ? <IconChevronUp size={16} /> : <IconPlus size={16} />}
-              <span>{showProvisionForm ? "Formular schließen" : "+ Instanz bereitstellen"}</span>
+              {showForm ? <IconChevronUp size={16} /> : <IconPlus size={16} />}
+              <span>{showForm ? "Formular schließen" : "+ Neue Appliance starten"}</span>
             </button>
           </div>
         </div>
 
-        {/* 4 Pure Operational KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        {/* 3 Schlanke Metrik-Karten */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-card border border-line p-5 rounded-2xl">
-            <span className="text-xs text-ink-soft uppercase font-bold tracking-wider">Gesamt-Instanzen</span>
-            <div className="text-2xl sm:text-3xl font-black text-ink mt-2 font-mono">
-              {instances.length}
-            </div>
-          </div>
-
-          <div className="bg-card border border-line p-5 rounded-2xl">
-            <span className="text-xs text-ink-soft uppercase font-bold tracking-wider">Aktive Instanzen</span>
+            <span className="text-xs text-ink-soft uppercase font-bold tracking-wider">Laufende Instanzen</span>
             <div className="text-2xl sm:text-3xl font-black text-emerald-500 mt-2 font-mono flex items-baseline gap-2">
               <span>{activeCount}</span>
-              <span className="text-xs text-ink-soft font-normal">RUNNING</span>
+              <span className="text-xs text-ink-soft font-normal">/ {instances.length} Gesamt</span>
             </div>
           </div>
 
           <div className="bg-card border border-line p-5 rounded-2xl">
-            <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1">
+            <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1.5">
               <IconShieldLock size={14} className="text-amber-500" /> Lokale Docker Stacks
             </span>
             <div className="text-2xl sm:text-3xl font-black text-ink mt-2 font-mono">
@@ -214,7 +183,7 @@ export default function OperationalCommandCenter() {
           </div>
 
           <div className="bg-card border border-line p-5 rounded-2xl">
-            <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1">
+            <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1.5">
               <IconBolt size={14} className="text-signal" /> Google Cloud VMs
             </span>
             <div className="text-2xl sm:text-3xl font-black text-ink mt-2 font-mono">
@@ -224,21 +193,21 @@ export default function OperationalCommandCenter() {
         </div>
       </div>
 
-      {/* SEKTION 1: Bereitstellungs-Formular (Aufklappbar) */}
-      {showProvisionForm && (
+      {/* Bereitstellungs-Wizard (Kompakt & Einfach) */}
+      {showForm && (
         <div className="bg-card border-2 border-signal/40 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6 animate-fade-in">
           <div className="flex items-center justify-between border-b border-line pb-4">
             <div>
               <h2 className="text-base sm:text-lg font-bold text-ink flex items-center gap-2">
-                <IconPlus size={20} className="text-signal" /> Neue VIRKI AI-OS Appliance starten
+                <IconPlus size={20} className="text-signal" /> Neue VIRKI AI-OS Appliance bereitstellen
               </h2>
               <p className="text-xs text-ink-soft mt-0.5">
-                Stellen Sie eine neue Instanz entweder direkt lokal als Docker Stack oder als Cloud-VM in Google Cloud bereit.
+                Geben Sie den Kundennamen ein und wählen Sie das Bereitstellungsziel.
               </p>
             </div>
             <button
               type="button"
-              onClick={() => setShowProvisionForm(false)}
+              onClick={() => setShowForm(false)}
               className="text-xs text-ink-soft hover:text-ink cursor-pointer"
             >
               ✕ Schließen
@@ -246,162 +215,68 @@ export default function OperationalCommandCenter() {
           </div>
 
           <form onSubmit={handleProvisionSubmit} className="space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-ink mb-1">Mandanten-ID (Identifier)*</label>
-                <input
-                  type="text"
-                  required
-                  value={tenantId}
-                  onChange={(e) => setTenantId(e.target.value)}
-                  placeholder="z.B. meister-schulze"
-                  className="w-full text-xs font-mono px-3 py-2 rounded-xl border border-line bg-paper text-ink focus:outline-none focus:border-signal"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-ink mb-1">Name / Mandant*</label>
-                <input
-                  type="text"
-                  required
-                  value={companyName}
-                  onChange={(e) => setCompanyName(e.target.value)}
-                  placeholder="z.B. Schulze Bedachungen GmbH"
-                  className="w-full text-xs px-3 py-2 rounded-xl border border-line bg-paper text-ink focus:outline-none focus:border-signal"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-ink mb-1">Admin E-Mail</label>
-                <input
-                  type="email"
-                  value={adminEmail}
-                  onChange={(e) => setAdminEmail(e.target.value)}
-                  placeholder="admin@lokal.lan"
-                  className="w-full text-xs px-3 py-2 rounded-xl border border-line bg-paper text-ink focus:outline-none focus:border-signal"
-                />
-              </div>
+            <div>
+              <label className="block text-xs font-bold text-ink uppercase tracking-wider mb-1.5">
+                Kunden- / Mandantenname*
+              </label>
+              <input
+                type="text"
+                required
+                autoFocus
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                placeholder="z.B. Schulze Bedachungen GmbH"
+                className="w-full text-sm px-4 py-2.5 rounded-xl border border-line bg-paper text-ink focus:outline-none focus:border-signal"
+              />
             </div>
 
-            {/* Switch: Lokaler Docker Stack vs GCP VM */}
+            {/* Ziel-Auswahl */}
             <div>
               <label className="block text-xs font-bold text-ink-soft uppercase tracking-wider mb-2">
-                Bereitstellungs-Ziel
+                Bereitstellungsziel
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <button
                   type="button"
                   onClick={() => setDeployType("docker_stack")}
-                  className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
+                  className={`p-5 rounded-2xl border text-left transition-all cursor-pointer ${
                     deployType === "docker_stack"
                       ? "bg-amber-500/10 border-amber-500 ring-2 ring-amber-500/20"
                       : "bg-paper/40 border-line hover:border-line-strong opacity-80"
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold font-mono text-amber-500 uppercase flex items-center gap-1.5">
-                      <IconShieldLock size={15} /> 🐳 Lokaler Docker Stack
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-bold text-amber-500 flex items-center gap-2">
+                      <IconShieldLock size={18} /> 🐳 Lokaler Docker Stack
                     </span>
-                    {deployType === "docker_stack" && <IconCheck size={16} className="text-amber-500" />}
+                    {deployType === "docker_stack" && <IconCheck size={18} className="text-amber-500" />}
                   </div>
                   <p className="text-xs text-ink-soft leading-relaxed">
-                    Startet sofort als Container-Stack auf dieser Maschine/VM. Schnellste Bereitstellung.
+                    Startet sofort als isolierter Container-Stack auf diesem Server. Schnellste Bereitstellung.
                   </p>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setDeployType("gcp_vm")}
-                  className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
+                  className={`p-5 rounded-2xl border text-left transition-all cursor-pointer ${
                     deployType === "gcp_vm"
                       ? "bg-signal/10 border-signal ring-2 ring-signal/20"
                       : "bg-paper/40 border-line hover:border-line-strong opacity-80"
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold font-mono text-signal uppercase flex items-center gap-1.5">
-                      <IconBolt size={15} /> 🏢 Google Cloud VM (Frankfurt)
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-bold text-signal flex items-center gap-2">
+                      <IconBolt size={18} /> 🏢 Google Cloud VM (Frankfurt)
                     </span>
-                    {deployType === "gcp_vm" && <IconCheck size={16} className="text-signal" />}
+                    {deployType === "gcp_vm" && <IconCheck size={18} className="text-signal" />}
                   </div>
                   <p className="text-xs text-ink-soft leading-relaxed">
-                    Startet eine dedizierte Compute Engine VM in Frankfurt mit eigener IP und automatischem Systemd-Autostart.
+                    Startet eine dedizierte Compute Engine VM in Frankfurt mit eigener IP und Systemd-Autostart.
                   </p>
                 </button>
               </div>
             </div>
-
-            {/* Details je nach Ziel */}
-            {deployType === "docker_stack" ? (
-              <div className="space-y-4 pt-2">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-ink mb-1">Web Konsole Port</label>
-                    <input
-                      type="number"
-                      value={webPort}
-                      onChange={(e) => setWebPort(Number(e.target.value))}
-                      className="w-full text-xs font-mono px-3 py-2 rounded-xl border border-line bg-paper text-ink"
-                    />
-                    <p className="text-[10px] text-ink-soft mt-1">URL: http://localhost:{webPort}</p>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-ink mb-1">API Backend Port</label>
-                    <input
-                      type="number"
-                      value={apiPort}
-                      onChange={(e) => setApiPort(Number(e.target.value))}
-                      className="w-full text-xs font-mono px-3 py-2 rounded-xl border border-line bg-paper text-ink"
-                    />
-                    <p className="text-[10px] text-ink-soft mt-1">API: http://localhost:{apiPort}</p>
-                  </div>
-                </div>
-
-                <div className="p-4 rounded-xl bg-paper/60 border border-line flex items-center justify-between gap-4">
-                  <span className="text-xs text-ink-soft font-mono">1-Line Installer für Remote-Terminal</span>
-                  <button
-                    type="button"
-                    onClick={handleFetchOneLineInstaller}
-                    className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1"
-                  >
-                    <IconTerminal2 size={13} /> Befehl generieren
-                  </button>
-                </div>
-
-                {oneLineScript && (
-                  <div className="bg-black/80 p-3 rounded-lg font-mono text-[11px] text-emerald-400 break-all select-all">
-                    {oneLineScript}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                <div>
-                  <label className="block text-xs font-semibold text-ink mb-1">GCP Zone</label>
-                  <select
-                    value={zone}
-                    onChange={(e) => setZone(e.target.value)}
-                    className="w-full text-xs font-mono px-3 py-2 rounded-xl border border-line bg-paper text-ink"
-                  >
-                    <option value="europe-west3-a">europe-west3-a (Frankfurt)</option>
-                    <option value="europe-west3-b">europe-west3-b (Frankfurt)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-ink mb-1">Maschinentyp</label>
-                  <select
-                    value={machineType}
-                    onChange={(e) => setMachineType(e.target.value)}
-                    className="w-full text-xs font-mono px-3 py-2 rounded-xl border border-line bg-paper text-ink"
-                  >
-                    <option value="e2-standard-4">e2-standard-4 (4 vCPU, 16 GB RAM)</option>
-                    <option value="e2-standard-8">e2-standard-8 (8 vCPU, 32 GB RAM)</option>
-                    <option value="e2-medium">e2-medium (2 vCPU, 4 GB RAM)</option>
-                  </select>
-                </div>
-              </div>
-            )}
 
             <div className="flex justify-end gap-3 pt-2">
               <button
@@ -415,7 +290,7 @@ export default function OperationalCommandCenter() {
                   </>
                 ) : (
                   <>
-                    <span>🚀</span> Jetzt Instanz starten
+                    <span>🚀</span> Jetzt Appliance starten
                   </>
                 )}
               </button>
@@ -424,30 +299,30 @@ export default function OperationalCommandCenter() {
         </div>
       )}
 
-      {/* SEKTION 2: Flotten- & Instanzen-Tabelle */}
+      {/* Flotten- & Instanzen-Tabelle */}
       <div className="bg-card border border-line rounded-2xl overflow-hidden shadow-sm">
         <div className="p-5 border-b border-line flex items-center justify-between">
-          <h2 className="font-bold text-sm text-ink">Bereitgestellte Instanzen & Mandanten</h2>
-          <span className="text-xs text-ink-soft font-mono">Stand: Live</span>
+          <h2 className="font-bold text-sm text-ink">Verwaltete Kunden-Appliances</h2>
+          <span className="text-xs text-ink-soft font-mono">Live-Status</span>
         </div>
 
         {loading && instances.length === 0 ? (
           <div className="p-12 text-center text-xs text-ink-soft">
-            <span className="animate-spin inline-block mr-2">⏳</span> Lade Flotten-Instanzen...
+            <span className="animate-spin inline-block mr-2">⏳</span> Lade Instanzen...
           </div>
         ) : instances.length === 0 ? (
           <div className="p-12 text-center space-y-4">
             <div className="text-3xl">🚀</div>
-            <h3 className="font-bold text-base text-ink">Noch keine Instanzen bereitgestellt</h3>
+            <h3 className="font-bold text-base text-ink">Noch keine Appliances gestartet</h3>
             <p className="text-xs text-ink-soft max-w-md mx-auto">
-              Starten Sie einen lokalen Docker Stack oder eine dedizierte Google Cloud VM mit einem Klick.
+              Starten Sie einen lokalen Docker Stack oder eine Google Cloud VM mit einem Klick.
             </p>
             <button
               type="button"
-              onClick={() => setShowProvisionForm(true)}
+              onClick={() => setShowForm(true)}
               className="btn-primary text-xs inline-flex items-center gap-1.5 py-2 px-4"
             >
-              <IconPlus size={16} /> Jetzt erste Instanz anlegen
+              <IconPlus size={16} /> Erste Appliance anlegen
             </button>
           </div>
         ) : (
@@ -457,8 +332,8 @@ export default function OperationalCommandCenter() {
                 <tr className="border-b border-line bg-paper/50 text-ink-soft uppercase text-[10px] tracking-wider">
                   <th className="py-3 px-5">Status</th>
                   <th className="py-3 px-4">Mandant / Name</th>
-                  <th className="py-3 px-4">Bereitstellung & Hardware</th>
-                  <th className="py-3 px-4">Endpunkt / URL</th>
+                  <th className="py-3 px-4">Bereitstellung</th>
+                  <th className="py-3 px-4">Endpunkt URL</th>
                   <th className="py-3 px-4 text-center">Appliance Öffnen</th>
                   <th className="py-3 px-5 text-right">Aktionen</th>
                 </tr>
@@ -489,16 +364,13 @@ export default function OperationalCommandCenter() {
 
                     <td className="py-4 px-4 font-medium text-ink">
                       <div className="font-bold text-sm text-ink">{inst.name}</div>
-                      <div className="text-[11px] text-ink-soft font-mono">Mandant: {inst.tenant_id}</div>
+                      <div className="text-[11px] text-ink-soft font-mono">ID: {inst.tenant_id}</div>
                     </td>
 
                     <td className="py-4 px-4">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-paper border border-line">
-                        {inst.type === "gcp_vm" ? `🏢 GCP VM (${inst.machine_type || "e2-std-4"})` : "🐳 Lokal Docker"}
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-mono bg-paper border border-line">
+                        {inst.type === "gcp_vm" ? "🏢 Google Cloud VM" : "🐳 Lokaler Docker Stack"}
                       </span>
-                      {inst.type === "gcp_vm" && (
-                        <div className="text-[10px] text-ink-soft mt-0.5">{inst.zone || "Frankfurt"}</div>
-                      )}
                     </td>
 
                     <td className="py-4 px-4 font-mono text-[11px]">
@@ -517,7 +389,7 @@ export default function OperationalCommandCenter() {
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1.5 btn-primary text-xs py-1.5 px-3 rounded-lg shadow-sm"
                         >
-                          <span>🚀 Öffnen</span>
+                          <span>🚀 Appliance öffnen</span>
                           <IconExternalLink size={13} />
                         </a>
                       ) : (

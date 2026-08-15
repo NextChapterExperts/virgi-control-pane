@@ -7,4 +7,3 @@ pytest>=8.3.0
 pytest-asyncio>=0.25.0
 google-api-python-client>=2.160.0
 google-auth>=2.38.0
-stripe>=11.5.0
