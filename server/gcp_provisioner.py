@@ -244,8 +244,8 @@ echo "=== VIRKI Appliance erfolgreich gestartet und Autostart registriert (Port 
                         break
 
         if nat_ip:
-            endpoint_url = f"http://{nat_ip}:8090"
-            backend_url = f"http://{nat_ip}:8091"
+            endpoint_url = f"http://{nat_ip}:8190"
+            backend_url = f"http://{nat_ip}:8191"
             append_log(instance_id, f"🌐 Öffentliche IP zugewiesen: {nat_ip}")
             append_log(instance_id, f"🎉 VIRKI Appliance erreichbar unter: {endpoint_url}")
             update_instance_status(instance_id, "running", endpoint_url=endpoint_url, backend_url=backend_url)
