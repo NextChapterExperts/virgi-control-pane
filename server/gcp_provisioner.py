@@ -294,6 +294,34 @@ def _provision_gcp_cloud_run_worker(
                 text=True,
             )
 
+        # Entferne eventuelle Symlinks / venv / temp Dateien vor dem Cloud Run Upload
+        for item in [".venv", "venv", "node_modules", ".next", ".pytest_cache", "data"]:
+            p = repo_dir / item
+            if p.is_symlink() or p.is_file():
+                try:
+                    p.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            elif p.is_dir():
+                shutil.rmtree(p, ignore_errors=True)
+
+        # Erstelle strikte .gcloudignore
+        gcloudignore_content = """
+.git
+.gitignore
+.gcloudignore
+.venv
+venv
+*.pyc
+__pycache__
+node_modules
+.next
+.pytest_cache
+data
+*.log
+"""
+        (repo_dir / ".gcloudignore").write_text(gcloudignore_content.strip(), encoding="utf-8")
+
         # Dockerfile & Entrypoint in Root-Kontext kopieren für Cloud Build
         dockerfile_src = repo_dir / "deploy" / "docker" / "Dockerfile"
         if dockerfile_src.exists():
@@ -314,6 +342,7 @@ def _provision_gcp_cloud_run_worker(
             "--memory=2Gi",
             "--cpu=2",
             f"--set-env-vars=AIOS_TENANT_ID={clean_tenant},AIOS_COMPANY_NAME={company_name}",
+            "--quiet",
             "--format=json",
         ]
         deploy_res = _run_gcloud(cmd_deploy)
