@@ -230,6 +230,10 @@ def stop_gcp_vm(vm_name: str, zone: str = DEFAULT_ZONE, project: str = DEFAULT_P
     _run_gcloud(["compute", "instances", "stop", vm_name, f"--zone={zone}", f"--project={project}"])
 
 
+def start_gcp_vm(vm_name: str, zone: str = DEFAULT_ZONE, project: str = DEFAULT_PROJECT) -> None:
+    _run_gcloud(["compute", "instances", "start", vm_name, f"--zone={zone}", f"--project={project}"])
+
+
 def delete_gcp_vm(vm_name: str, zone: str = DEFAULT_ZONE, project: str = DEFAULT_PROJECT) -> None:
     _run_gcloud(["compute", "instances", "delete", vm_name, f"--zone={zone}", f"--project={project}", "--quiet"])
 

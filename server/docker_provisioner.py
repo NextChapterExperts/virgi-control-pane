@@ -230,3 +230,18 @@ volumes:
         err_msg = str(exc)
         append_log(instance_id, f"❌ Docker Bereitstellung fehlgeschlagen: {err_msg}", level="ERROR")
         update_instance_status(instance_id, "error")
+
+
+def stop_local_docker_stack(tenant_id: str) -> None:
+    """Stoppt (pausiert) den laufenden Docker Container."""
+    subprocess.run(["docker", "stop", f"virki-appliance-{tenant_id}"], capture_output=True, text=True)
+
+
+def start_local_docker_stack(tenant_id: str) -> None:
+    """Startet (reaktiviert) den pausierten Docker Container."""
+    subprocess.run(["docker", "start", f"virki-appliance-{tenant_id}"], capture_output=True, text=True)
+
+
+def delete_local_docker_stack(tenant_id: str) -> None:
+    """Entfernt den Docker Container restlos."""
+    subprocess.run(["docker", "rm", "-f", f"virki-appliance-{tenant_id}"], capture_output=True, text=True)

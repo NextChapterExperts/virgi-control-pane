@@ -13,6 +13,8 @@ import {
   IconBolt,
   IconCloud,
   IconChevronUp,
+  IconPlayerPause,
+  IconPlayerPlay,
 } from "@tabler/icons-react";
 
 interface Instance {
@@ -36,6 +38,7 @@ export default function ControlPlaneCockpit() {
   const [selectedLogsId, setSelectedLogsId] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   // Form states
   const [showForm, setShowForm] = useState(false);
@@ -100,13 +103,42 @@ export default function ControlPlaneCockpit() {
     }
   };
 
+  const handlePause = async (id: string) => {
+    setActionLoadingId(id);
+    try {
+      const res = await fetch(`${API_BASE}/v1/instances/${id}/pause`, { method: "POST" });
+      if (!res.ok) throw new Error("Pausieren fehlgeschlagen");
+      loadInstances();
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleStart = async (id: string) => {
+    setActionLoadingId(id);
+    try {
+      const res = await fetch(`${API_BASE}/v1/instances/${id}/start`, { method: "POST" });
+      if (!res.ok) throw new Error("Starten fehlgeschlagen");
+      loadInstances();
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Soll die Instanz '${name}' wirklich gestoppt und entfernt werden?`)) return;
+    if (!confirm(`Soll die Instanz '${name}' wirklich gestoppt und unwiderruflich gelöscht werden?`)) return;
+    setActionLoadingId(id);
     try {
       await fetch(`${API_BASE}/v1/instances/${id}`, { method: "DELETE" });
       loadInstances();
     } catch (e) {
       alert("Löschen fehlgeschlagen");
+    } finally {
+      setActionLoadingId(null);
     }
   };
 
@@ -335,7 +367,7 @@ export default function ControlPlaneCockpit() {
       <div className="bg-card border border-line rounded-2xl overflow-hidden shadow-sm">
         <div className="p-5 border-b border-line flex items-center justify-between">
           <h2 className="font-bold text-sm text-ink">Verwaltete Kunden-Appliances</h2>
-          <span className="text-xs text-ink-soft font-mono">Live-Status</span>
+          <span className="text-xs text-ink-soft font-mono">Live-Status & Steuerung</span>
         </div>
 
         {loading && instances.length === 0 ? (
@@ -367,7 +399,7 @@ export default function ControlPlaneCockpit() {
                   <th className="py-3 px-4">Bereitstellung</th>
                   <th className="py-3 px-4">Endpunkt URL</th>
                   <th className="py-3 px-4 text-center">Appliance Öffnen</th>
-                  <th className="py-3 px-5 text-right">Aktionen</th>
+                  <th className="py-3 px-5 text-right">Steuerung & Aktionen</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line/60">
@@ -378,6 +410,12 @@ export default function ControlPlaneCockpit() {
                         <span className="inline-flex items-center gap-1.5 text-emerald-500 font-bold font-mono">
                           <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
                           RUNNING
+                        </span>
+                      )}
+                      {inst.status === "stopped" && (
+                        <span className="inline-flex items-center gap-1.5 text-ink-soft font-bold font-mono">
+                          <span className="h-2 w-2 rounded-full bg-ink-soft"></span>
+                          STOPPED
                         </span>
                       )}
                       {inst.status === "provisioning" && (
@@ -416,7 +454,7 @@ export default function ControlPlaneCockpit() {
                     </td>
 
                     <td className="py-4 px-4 text-center">
-                      {inst.endpoint_url ? (
+                      {inst.status === "running" && inst.endpoint_url ? (
                         <a
                           href={inst.endpoint_url}
                           target="_blank"
@@ -426,12 +464,39 @@ export default function ControlPlaneCockpit() {
                           <span>🚀 Appliance öffnen</span>
                           <IconExternalLink size={13} />
                         </a>
+                      ) : inst.status === "stopped" ? (
+                        <span className="text-ink-soft text-[11px] italic">Pausiert</span>
                       ) : (
                         <span className="text-ink-soft text-[11px]">In Vorbereitung</span>
                       )}
                     </td>
 
                     <td className="py-4 px-5 text-right whitespace-nowrap space-x-2">
+                      {/* Pause / Start Button */}
+                      {inst.status === "running" && (
+                        <button
+                          type="button"
+                          disabled={actionLoadingId === inst.id}
+                          onClick={() => handlePause(inst.id)}
+                          className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1 text-amber-500 hover:text-amber-600"
+                          title="Instanz pausieren"
+                        >
+                          <IconPlayerPause size={13} /> Pause
+                        </button>
+                      )}
+
+                      {inst.status === "stopped" && (
+                        <button
+                          type="button"
+                          disabled={actionLoadingId === inst.id}
+                          onClick={() => handleStart(inst.id)}
+                          className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1 text-emerald-500 hover:text-emerald-600"
+                          title="Instanz starten"
+                        >
+                          <IconPlayerPlay size={13} /> Start
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         onClick={() => openLogsModal(inst.id)}
@@ -443,11 +508,12 @@ export default function ControlPlaneCockpit() {
 
                       <button
                         type="button"
+                        disabled={actionLoadingId === inst.id}
                         onClick={() => handleDelete(inst.id, inst.name)}
-                        className="text-danger hover:underline text-xs py-1.5 px-2 inline-flex items-center gap-1"
+                        className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1 text-danger hover:bg-danger/10"
                         title="Instanz löschen"
                       >
-                        <IconTrash size={13} />
+                        <IconTrash size={13} /> Löschen
                       </button>
                     </td>
                   </tr>

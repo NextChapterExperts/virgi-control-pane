@@ -24,6 +24,7 @@ from .db import (
     create_instance,
     get_instance,
     list_instances,
+    update_instance_status,
     delete_instance,
     get_logs,
     append_log,
@@ -31,9 +32,14 @@ from .db import (
 from .docker_provisioner import (
     generate_docker_install_script,
     provision_local_docker_stack_async,
+    stop_local_docker_stack,
+    start_local_docker_stack,
+    delete_local_docker_stack,
 )
 from .gcp_provisioner import (
     provision_gcp_vm_async,
+    stop_gcp_vm,
+    start_gcp_vm,
     delete_gcp_vm,
     provision_gcp_cloud_run_async,
     delete_gcp_cloud_run,
@@ -197,21 +203,64 @@ def api_provision_instance(req: ProvisionRequest):
         return {"status": "ok", "message": "Docker Stack Bereitstellung gestartet", "instance": inst}
 
 
+@app.post("/v1/instances/{instance_id}/pause")
+def api_pause_instance(instance_id: str):
+    inst = get_instance(instance_id)
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instanz nicht gefunden")
+    
+    tenant_id = inst["tenant_id"]
+    if inst["type"] == "docker_stack":
+        stop_local_docker_stack(tenant_id)
+    elif inst["type"] == "gcp_vm":
+        try:
+            stop_gcp_vm(f"virki-{tenant_id}", zone=inst.get("zone") or "europe-west3-a")
+        except Exception as exc:
+            log.warning("GCP VM konnte nicht gestoppt werden: %s", exc)
+
+    update_instance_status(instance_id, "stopped")
+    append_log(instance_id, "⏸️ Instanz erfolgreich pausiert (gestoppt).")
+    return {"status": "ok", "message": "Instanz pausiert"}
+
+
+@app.post("/v1/instances/{instance_id}/start")
+def api_start_instance(instance_id: str):
+    inst = get_instance(instance_id)
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instanz nicht gefunden")
+    
+    tenant_id = inst["tenant_id"]
+    if inst["type"] == "docker_stack":
+        start_local_docker_stack(tenant_id)
+    elif inst["type"] == "gcp_vm":
+        try:
+            start_gcp_vm(f"virki-{tenant_id}", zone=inst.get("zone") or "europe-west3-a")
+        except Exception as exc:
+            log.warning("GCP VM konnte nicht gestartet werden: %s", exc)
+
+    update_instance_status(instance_id, "running")
+    append_log(instance_id, "▶️ Instanz erfolgreich fortgesetzt (gestartet).")
+    return {"status": "ok", "message": "Instanz gestartet"}
+
+
 @app.delete("/v1/instances/{instance_id}")
 def api_delete_instance(instance_id: str):
     inst = get_instance(instance_id)
     if not inst:
         raise HTTPException(status_code=404, detail="Instanz nicht gefunden")
     
-    # GCP Ressourcen aufräumen
-    if inst["type"] == "gcp_vm":
+    tenant_id = inst["tenant_id"]
+    # Container & Cloud Ressourcen restlos entfernen
+    if inst["type"] == "docker_stack":
+        delete_local_docker_stack(tenant_id)
+    elif inst["type"] == "gcp_vm":
         try:
-            delete_gcp_vm(f"virki-{inst['tenant_id']}", zone=inst.get("zone") or "europe-west3-a")
+            delete_gcp_vm(f"virki-{tenant_id}", zone=inst.get("zone") or "europe-west3-a")
         except Exception as exc:
             log.warning("GCP VM konnte nicht gelöscht werden: %s", exc)
     elif inst["type"] == "gcp_cloud_run":
         try:
-            delete_gcp_cloud_run(f"virki-{inst['tenant_id']}", region=inst.get("zone") or "europe-west3")
+            delete_gcp_cloud_run(f"virki-{tenant_id}", region=inst.get("zone") or "europe-west3")
         except Exception as exc:
             log.warning("Cloud Run Service konnte nicht gelöscht werden: %s", exc)
 
