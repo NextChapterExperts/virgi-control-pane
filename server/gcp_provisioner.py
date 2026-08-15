@@ -260,15 +260,18 @@ echo "=== VIRKI Appliance erfolgreich gestartet und Autostart registriert (Port 
 
 
 def stop_gcp_vm(vm_name: str, zone: str = DEFAULT_ZONE, project: str = DEFAULT_PROJECT) -> None:
-    _run_gcloud(["compute", "instances", "stop", vm_name, f"--zone={zone}", f"--project={project}"])
+    """Stoppt die GCP Compute Engine VM sofort asynchron ohne Blockieren."""
+    _run_gcloud(["compute", "instances", "stop", vm_name, f"--zone={zone}", f"--project={project}", "--async"])
 
 
 def start_gcp_vm(vm_name: str, zone: str = DEFAULT_ZONE, project: str = DEFAULT_PROJECT) -> None:
-    _run_gcloud(["compute", "instances", "start", vm_name, f"--zone={zone}", f"--project={project}"])
+    """Startet die GCP Compute Engine VM sofort asynchron."""
+    _run_gcloud(["compute", "instances", "start", vm_name, f"--zone={zone}", f"--project={project}", "--async"])
 
 
 def delete_gcp_vm(vm_name: str, zone: str = DEFAULT_ZONE, project: str = DEFAULT_PROJECT) -> None:
-    _run_gcloud(["compute", "instances", "delete", vm_name, f"--zone={zone}", f"--project={project}", "--quiet"])
+    """Löscht die GCP Compute Engine VM sofort asynchron."""
+    _run_gcloud(["compute", "instances", "delete", vm_name, f"--zone={zone}", f"--project={project}", "--quiet", "--async"])
 
 
 # -----------------------------------------------------------------------------
