@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 
 type BrightnessMode = "medium" | "dark" | "light";
 
@@ -17,10 +17,29 @@ interface Instance {
   created_at: number;
 }
 
+interface ApiEndpoint {
+  id: string;
+  method: "GET" | "POST" | "DELETE";
+  path: string;
+  desc: string;
+  category: "Flotte" | "Provisionierung" | "Lifecycle" | "System";
+  defaultPayload?: any;
+}
+
+const CONTROL_PLANE_APIS: ApiEndpoint[] = [
+  { id: "health", method: "GET", path: "/v1/health", desc: "System Health & Backend Status", category: "System" },
+  { id: "instances_list", method: "GET", path: "/v1/instances", desc: "Liste aller aktiven und registrierten Appliances", category: "Flotte" },
+  { id: "provision_demo", method: "POST", path: "/v1/instances/provision", desc: "Provisionierungs-Workflow initiieren (Docker/GCP)", category: "Provisionierung", defaultPayload: { tenant_id: "test-mandant", company_name: "Test Mandant GmbH", type: "docker_stack" } },
+  { id: "instance_detail", method: "GET", path: "/v1/instances/inst-nextchapter-local", desc: "Metadaten einer spezifischen Appliance abrufen", category: "Flotte" },
+  { id: "instance_logs", method: "GET", path: "/v1/instances/inst-nextchapter-local/logs", desc: "Live-Audit- & Provisionierungslogs abrufen", category: "Flotte" },
+  { id: "instance_pause", method: "POST", path: "/v1/instances/inst-nextchapter-local/pause", desc: "Compute-Container pausieren (Kostenstopp)", category: "Lifecycle" },
+  { id: "instance_start", method: "POST", path: "/v1/instances/inst-nextchapter-local/start", desc: "Pausierte Appliance wieder hochfahren", category: "Lifecycle" },
+];
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 export default function ControlPlanePage() {
-  const [activeTab, setActiveTab] = useState<"fleet" | "provision" | "cloud" | "finops" | "logs" | "apis">("fleet");
+  const [activeTab, setActiveTab] = useState<"fleet" | "provision" | "gcp" | "finops" | "logs" | "apis">("fleet");
   const [theme, setTheme] = useState<BrightnessMode>("medium");
   const [instances, setInstances] = useState<Instance[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,16 +50,16 @@ export default function ControlPlanePage() {
   const [selectedLogsId, setSelectedLogsId] = useState<string | null>(null);
   const [selectedLogsInstance, setSelectedLogsInstance] = useState<Instance | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
-  const [loadingLogs, setLoadingLogs] = useState(false);
-  const [autoCloseTriggered, setAutoCloseTriggered] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   // Form states
-  const [showForm, setShowForm] = useState(false);
   const [companyName, setCompanyName] = useState("");
   const [deployType, setDeployType] = useState<"docker_stack" | "gcp_cloud_run" | "gcp_vm">("docker_stack");
   const [provisioning, setProvisioning] = useState(false);
+
+  // API Testing states
+  const [apiResults, setApiResults] = useState<Record<string, { status: number; ok: boolean; latency_ms: number; data?: any; error?: string; loading?: boolean }>>({});
+  const [testingAll, setTestingAll] = useState(false);
 
   // EXACT themeStyles from Core-Platform
   const themeStyles = {
@@ -233,7 +252,6 @@ export default function ControlPlanePage() {
       const data = await res.json();
 
       setCompanyName("");
-      setShowForm(false);
       if (data.instance && data.instance.id) {
         setSelectedLogsId(data.instance.id);
         setActiveTab("logs");
@@ -310,6 +328,62 @@ export default function ControlPlanePage() {
     return { costVal: 0, costStr: "0,00 €", rateStr: "0,00 € / Std.", detail: "" };
   };
 
+  // API Testing logic
+  const handleTestApi = async (api: ApiEndpoint) => {
+    setApiResults((prev) => ({
+      ...prev,
+      [api.id]: { status: 0, ok: false, latency_ms: 0, loading: true },
+    }));
+
+    const start = performance.now();
+    try {
+      const url = `${API_BASE}${api.path}`;
+      const res = await fetch(url, {
+        method: api.method,
+        headers: { "Content-Type": "application/json" },
+        ...(api.defaultPayload && api.method === "POST" ? { body: JSON.stringify(api.defaultPayload) } : {}),
+      });
+      const latency = Math.round(performance.now() - start);
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = await res.text();
+      }
+
+      setApiResults((prev) => ({
+        ...prev,
+        [api.id]: {
+          status: res.status,
+          ok: res.ok,
+          latency_ms: latency,
+          data,
+          loading: false,
+        },
+      }));
+    } catch (e: any) {
+      const latency = Math.round(performance.now() - start);
+      setApiResults((prev) => ({
+        ...prev,
+        [api.id]: {
+          status: 502,
+          ok: false,
+          latency_ms: latency,
+          error: e.message || String(e),
+          loading: false,
+        },
+      }));
+    }
+  };
+
+  const handleTestAllApis = async () => {
+    setTestingAll(true);
+    for (const api of CONTROL_PLANE_APIS) {
+      await handleTestApi(api);
+    }
+    setTestingAll(false);
+  };
+
   const activeCount = instances.filter((i) => i.status === "running").length;
   const dockerCount = instances.filter((i) => i.type === "docker_stack").length;
   const gcpRunCount = instances.filter((i) => i.type === "gcp_cloud_run").length;
@@ -319,7 +393,7 @@ export default function ControlPlanePage() {
   return (
     <div className={`min-h-screen ${themeStyles.bg} ${themeStyles.text} flex flex-col font-sans transition-colors duration-200 selection:bg-cyan-500/20 selection:text-cyan-200 rounded-2xl overflow-hidden`}>
       {/* ========================================================================= */}
-      {/* 🧭 TOP-BAR NAVIGATION (REIN MONOSPACED & OHNE ICONS)                      */}
+      {/* 🧭 TOP-BAR NAVIGATION (KURZE TAB-NAMEN, MONOSPACE, KEINE ICONS)            */}
       {/* ========================================================================= */}
       <header className={`h-16 border-b ${themeStyles.border} ${themeStyles.headerBg} backdrop-blur-md px-6 flex items-center justify-between sticky top-0 z-40 shadow-sm transition-colors duration-200`}>
         <div className="flex items-center gap-6">
@@ -330,7 +404,7 @@ export default function ControlPlanePage() {
                 activeTab === "fleet" ? themeStyles.navActive : `border-transparent ${themeStyles.navInactive}`
               }`}
             >
-              [ Instanzen & Flotte ]
+              [ Instanzen ]
             </button>
 
             <button
@@ -343,12 +417,12 @@ export default function ControlPlanePage() {
             </button>
 
             <button
-              onClick={() => setActiveTab("cloud")}
+              onClick={() => setActiveTab("gcp")}
               className={`px-3 py-1.5 rounded-lg border transition cursor-pointer ${
-                activeTab === "cloud" ? themeStyles.navActive : `border-transparent ${themeStyles.navInactive}`
+                activeTab === "gcp" ? themeStyles.navActive : `border-transparent ${themeStyles.navInactive}`
               }`}
             >
-              [ GCP & Cloud Run ]
+              [ GCP ]
             </button>
 
             <button
@@ -357,7 +431,7 @@ export default function ControlPlanePage() {
                 activeTab === "finops" ? themeStyles.navActive : `border-transparent ${themeStyles.navInactive}`
               }`}
             >
-              [ FinOps & Tarife ]
+              [ FinOps ]
             </button>
 
             <button
@@ -366,7 +440,7 @@ export default function ControlPlanePage() {
                 activeTab === "logs" ? themeStyles.navActive : `border-transparent ${themeStyles.navInactive}`
               }`}
             >
-              [ Live-Logs ]
+              [ Logs ]
             </button>
 
             <button
@@ -400,7 +474,7 @@ export default function ControlPlanePage() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 1: INSTANZEN & FLOTTE                                                */}
+        {/* TAB 1: INSTANZEN                                                         */}
         {/* ========================================================================= */}
         {activeTab === "fleet" && (
           <div className="space-y-6">
@@ -457,7 +531,7 @@ export default function ControlPlanePage() {
               </div>
             </div>
 
-            {/* Instance Cards Table / List */}
+            {/* Instance List */}
             <div className="space-y-4">
               <h2 className={`text-xs font-bold uppercase tracking-wider font-mono ${themeStyles.titleColor}`}>
                 Aktive Mandanten & Appliances
@@ -514,7 +588,7 @@ export default function ControlPlanePage() {
                           <button
                             onClick={() => handlePause(inst.id)}
                             disabled={actionLoadingId === inst.id}
-                            className={`px-3 py-1.5 rounded-lg border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 cursor-pointer`}
+                            className="px-3 py-1.5 rounded-lg border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 cursor-pointer"
                           >
                             [ Pausieren ]
                           </button>
@@ -522,7 +596,7 @@ export default function ControlPlanePage() {
                           <button
                             onClick={() => handleStart(inst.id)}
                             disabled={actionLoadingId === inst.id}
-                            className={`px-3 py-1.5 rounded-lg border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 cursor-pointer`}
+                            className="px-3 py-1.5 rounded-lg border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 cursor-pointer"
                           >
                             [ Starten ]
                           </button>
@@ -656,9 +730,9 @@ export default function ControlPlanePage() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 3: GCP & CLOUD RUN                                                   */}
+        {/* TAB 3: GCP                                                               */}
         {/* ========================================================================= */}
-        {activeTab === "cloud" && (
+        {activeTab === "gcp" && (
           <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
               <div>
@@ -698,7 +772,7 @@ export default function ControlPlanePage() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 4: FINOPS & TARIFE                                                    */}
+        {/* TAB 4: FINOPS                                                            */}
         {/* ========================================================================= */}
         {activeTab === "finops" && (
           <div className="space-y-6">
@@ -712,11 +786,11 @@ export default function ControlPlanePage() {
             </div>
 
             <div className={`p-6 rounded-2xl ${themeStyles.cardBg} border ${themeStyles.cardBorder} shadow-sm space-y-4`}>
-              <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                <span className={`text-xs font-mono font-bold ${themeStyles.titleColor}`}>MANDANT</span>
-                <span className={`text-xs font-mono font-bold ${themeStyles.titleColor}`}>TYP</span>
-                <span className={`text-xs font-mono font-bold ${themeStyles.titleColor}`}>STUNDENSATZ</span>
-                <span className={`text-xs font-mono font-bold ${themeStyles.titleColor}`}>GESAMTKOSTEN</span>
+              <div className="flex items-center justify-between border-b border-white/10 pb-3 font-mono text-xs font-bold text-neutral-400">
+                <span>MANDANT</span>
+                <span>TYP</span>
+                <span>STUNDENSATZ</span>
+                <span>GESAMTKOSTEN</span>
               </div>
 
               {instances.map((inst) => {
@@ -740,7 +814,7 @@ export default function ControlPlanePage() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 5: LIVE-LOGS                                                         */}
+        {/* TAB 5: LOGS                                                              */}
         {/* ========================================================================= */}
         {activeTab === "logs" && (
           <div className="space-y-6">
@@ -781,39 +855,100 @@ export default function ControlPlanePage() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 6: APIS                                                              */}
+        {/* TAB 6: APIS (INTERAKTIVER API-TESTER MIT TEST-KNOPF)                      */}
         {/* ========================================================================= */}
         {activeTab === "apis" && (
           <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
               <div>
-                <h1 className={`text-lg font-bold ${themeStyles.titleColor}`}>Control Plane REST API Katalog (Port 8080)</h1>
-                <p className={`text-xs ${themeStyles.subtextColor} mt-1`}>Flottenverwaltung und automatisierte Provisionierung.</p>
+                <h1 className={`text-lg font-bold ${themeStyles.titleColor}`}>Control Plane REST APIs (Port 8080)</h1>
+                <p className={`text-xs ${themeStyles.subtextColor} mt-1`}>
+                  Flottenverwaltung, Instanz-Lifecycle und automatisierte Bereitstellung live testen.
+                </p>
               </div>
+              <button
+                onClick={handleTestAllApis}
+                disabled={testingAll}
+                className="px-3.5 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono font-bold shadow-sm transition cursor-pointer disabled:opacity-50"
+              >
+                [ {testingAll ? "Teste alle..." : "⚡ Alle APIs testen"} ]
+              </button>
             </div>
 
-            <div className="space-y-3">
-              {[
-                { method: "GET", path: "/v1/instances", desc: "Listet alle verwalteten Appliances und Status auf" },
-                { method: "POST", path: "/v1/instances/provision", desc: "Startet Provisionierung einer neuen Instanz (Docker/GCP)" },
-                { method: "POST", path: "/v1/instances/{id}/pause", desc: "Pausiert Compute-Ressourcen zur Kosteneinsparung" },
-                { method: "POST", path: "/v1/instances/{id}/start", desc: "Aktiviert pausierte Appliance" },
-                { method: "DELETE", path: "/v1/instances/{id}", desc: "Löscht Instanz und Container unwiderruflich" },
-                { method: "GET", path: "/v1/instances/{id}/logs", desc: "Gibt Live-Streaming Logs der Appliance zurück" },
-              ].map((endpoint) => (
-                <div
-                  key={endpoint.path}
-                  className={`p-4 rounded-xl border ${themeStyles.border} ${themeStyles.cardBg} flex items-center justify-between font-mono text-xs`}
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="px-2 py-0.5 rounded font-bold text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                      {endpoint.method}
-                    </span>
-                    <span className={`${themeStyles.titleColor} font-bold`}>{endpoint.path}</span>
+            <div className="space-y-4">
+              {CONTROL_PLANE_APIS.map((api) => {
+                const result = apiResults[api.id];
+                return (
+                  <div
+                    key={api.id}
+                    className={`p-5 rounded-2xl border ${themeStyles.border} ${themeStyles.cardBg} space-y-3 shadow-sm`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3 font-mono text-xs">
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={`px-2.5 py-1 rounded font-bold text-[10px] ${
+                            api.method === "GET"
+                              ? "bg-sky-500/10 text-sky-400 border border-sky-500/30"
+                              : api.method === "POST"
+                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                              : "bg-rose-500/10 text-rose-400 border border-rose-500/30"
+                          }`}
+                        >
+                          {api.method}
+                        </span>
+                        <span className={`${themeStyles.titleColor} font-bold text-sm`}>{api.path}</span>
+                        <span className={`px-2 py-0.5 rounded text-[10px] ${themeStyles.cardSubBg} ${themeStyles.subtextColor} border ${themeStyles.border}`}>
+                          {api.category}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        {result && (
+                          <div className="flex items-center gap-2 text-[11px]">
+                            <span
+                              className={`px-2 py-0.5 rounded font-bold ${
+                                result.ok
+                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                                  : "bg-rose-500/10 text-rose-400 border border-rose-500/30"
+                              }`}
+                            >
+                              {result.status > 0 ? `${result.status} ${result.ok ? "OK" : "ERROR"}` : "FAILED"}
+                            </span>
+                            {result.latency_ms > 0 && (
+                              <span className="text-cyan-400">({result.latency_ms}ms)</span>
+                            )}
+                          </div>
+                        )}
+
+                        <button
+                          onClick={() => handleTestApi(api)}
+                          disabled={result?.loading}
+                          className={`px-3 py-1.5 rounded-lg ${themeStyles.buttonSecondary} text-xs font-bold transition cursor-pointer disabled:opacity-50`}
+                        >
+                          [ {result?.loading ? "Testet..." : "Testen ⚡"} ]
+                        </button>
+                      </div>
+                    </div>
+
+                    <p className={`text-xs ${themeStyles.subtextColor}`}>
+                      {api.desc}
+                    </p>
+
+                    {/* Result Payload Preview */}
+                    {result && !result.loading && (result.data || result.error) && (
+                      <div className={`mt-3 p-3.5 rounded-xl ${themeStyles.cardSubBg} border ${themeStyles.border} font-mono text-[11px] space-y-1`}>
+                        <div className="text-neutral-500 text-[10px] uppercase font-bold flex justify-between items-center">
+                          <span>Live-Antwort (JSON)</span>
+                          <span className="text-neutral-400">Status: {result.status}</span>
+                        </div>
+                        <pre className="overflow-x-auto text-cyan-300 max-h-40 leading-relaxed pt-1">
+                          {result.error ? result.error : JSON.stringify(result.data, null, 2)}
+                        </pre>
+                      </div>
+                    )}
                   </div>
-                  <span className={`${themeStyles.subtextColor} text-[11px]`}>{endpoint.desc}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
