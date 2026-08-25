@@ -1,65 +1,49 @@
 @import "tailwindcss";
 
 :root {
-  --ink: #f0f4fc;
-  --ink-soft: #9ba3b8;
-  --paper: #0a0d14;
-  --card: #121620;
-  --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.16);
-  --signal: #3b82f6;
-  --danger: #ef4444;
+  --font-display: "Bricolage Grotesque", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-body: "Source Sans 3", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-mystic: "Cinzel", Georgia, serif;
+
+  --ink: #12161c;
+  --ink-soft: #3a4450;
+  --paper: #f3f1eb;
+  --paper-2: #e8e4da;
+  --signal: #0f6e56;
+  --signal-bright: #17a37a;
+  --warn: #b45309;
+  --danger: #b42318;
+  --line: color-mix(in oklab, var(--ink) 12%, transparent);
+  --glow: color-mix(in oklab, var(--signal) 18%, transparent);
+  --background: var(--paper);
+  --foreground: var(--ink);
 }
 
 @theme inline {
-  --color-paper: var(--paper);
-  --color-card: var(--card);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
   --color-ink: var(--ink);
   --color-ink-soft: var(--ink-soft);
-  --color-line: var(--line);
-  --color-line-strong: var(--line-strong);
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
   --color-signal: var(--signal);
+  --color-signal-bright: var(--signal-bright);
+  --color-warn: var(--warn);
   --color-danger: var(--danger);
+  --color-line: var(--line);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono);
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-mystic {
+  font-family: var(--font-mystic);
 }
 
 body {
-  background-color: var(--paper);
-  color: var(--ink);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  margin: 0;
-  padding: 0;
-}
-
-.btn-primary {
-  background-color: var(--signal);
-  color: white;
-  font-weight: 600;
-  border-radius: 0.75rem;
-  transition: all 0.2s;
-  cursor: pointer;
-}
-.btn-primary:hover {
-  opacity: 0.9;
-}
-
-.btn-secondary {
-  background-color: var(--card);
-  border: 1px solid var(--line);
-  color: var(--ink);
-  font-weight: 500;
-  border-radius: 0.75rem;
-  transition: all 0.2s;
-  cursor: pointer;
-}
-.btn-secondary:hover {
-  border-color: var(--line-strong);
-}
-
-.btn-ghost {
-  color: var(--ink-soft);
-  transition: color 0.2s;
-  cursor: pointer;
-}
-.btn-ghost:hover {
-  color: var(--ink);
+  font-family: var(--font-body);
 }
