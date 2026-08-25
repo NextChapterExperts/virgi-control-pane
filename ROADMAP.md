@@ -43,9 +43,13 @@ Die Control Plane ist das autarke Betreiber- und Flotten-Management für alle VI
 │ • docs/04-CORE-PLATFORM-INTEGRATION.md                                  │
 │ • docs/05-ENTERPRISE-FLEET-HARDENING.md                                 │
 ├─────────────────────────────────────────────────────────────────────────┤
-│ PHASE 6: PROTOTYP-BETRIEB & FACHAGENTEN-ANBINDUNG (Aktuell 🔄)          │
-│ • Betrieb als stabiler Entwicklungs- & Demo-Prototyp                    │
-│ • Anbindung des Fachagenten-Frameworks (1110-AI-OS-Core-Platform)        │
+│ PHASE 6: DYNAMISCHE APPLIANCE-CONFIG & .ENV-WIZARD ENGINE (Geplant 📅)  │
+│ • Provisionierungs-Wizard in Next.js Konsole (:8280) für alle Parameter │
+│ • Automatische Erstellung der kundenspezifischen `.env` & Mount-Pfade   │
+│ • Management von API-Keys (OpenRouter, Anthropic, OpenAI, Gemini)       │
+│ • Definition von Storage- & Projekt-Volumes (lokal, NFS, Nextcloud)     │
+│ • E-Mail/IMAP Konfiguration für Mail-&-Triage Fachagenten               │
+│ • 2-Wege Modell-Profil (Sovereign vs. Hybrid Frontier) pro Kunde        │
 ├─────────────────────────────────────────────────────────────────────────┤
 │ PHASE 7: PRODUKTIONSREIFE, HÄRTUNG & DISASTER RECOVERY (Geplant 📅)    │
 │ • Automatisierte Backup & Snapshot Engine (Postgres, Qdrant, Letta)     │
