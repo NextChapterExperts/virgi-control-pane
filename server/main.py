@@ -145,6 +145,7 @@ def _find_free_ports(start_web: int = 8200, start_api: int = 8201) -> tuple[int,
 # -----------------------------------------------------------------------------
 
 @app.get("/health")
+@app.get("/v1/health")
 def api_health():
     return {"status": "ok", "service": "virki-control-plane"}
 

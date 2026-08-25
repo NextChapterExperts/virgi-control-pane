@@ -85,7 +85,7 @@ const APIS: ApiDefinition[] = [
     name: "Control Plane Backend Liveness Probe",
     category: "System & Diagnostics",
     method: "GET",
-    path: "/v1/health",
+    path: "/health",
     description: "Systemstatus, Datenbank-Konnektivität und Docker Engine Verfügbarkeit.",
   },
 ];
