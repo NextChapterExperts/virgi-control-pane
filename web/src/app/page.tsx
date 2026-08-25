@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { ApiEndpointsPanel } from "@/components/ApiEndpointsPanel";
 
 type BrightnessMode = "medium" | "dark" | "light";
 
@@ -16,25 +17,6 @@ interface Instance {
   machine_type?: string;
   created_at: number;
 }
-
-interface ApiEndpoint {
-  id: string;
-  method: "GET" | "POST" | "DELETE";
-  path: string;
-  desc: string;
-  category: "Flotte" | "Provisionierung" | "Lifecycle" | "System";
-  defaultPayload?: any;
-}
-
-const CONTROL_PLANE_APIS: ApiEndpoint[] = [
-  { id: "health", method: "GET", path: "/v1/health", desc: "System Health & Backend Status", category: "System" },
-  { id: "instances_list", method: "GET", path: "/v1/instances", desc: "Liste aller aktiven und registrierten Appliances", category: "Flotte" },
-  { id: "provision_demo", method: "POST", path: "/v1/instances/provision", desc: "Provisionierungs-Workflow initiieren (Docker/GCP)", category: "Provisionierung", defaultPayload: { tenant_id: "test-mandant", company_name: "Test Mandant GmbH", type: "docker_stack" } },
-  { id: "instance_detail", method: "GET", path: "/v1/instances/inst-nextchapter-local", desc: "Metadaten einer spezifischen Appliance abrufen", category: "Flotte" },
-  { id: "instance_logs", method: "GET", path: "/v1/instances/inst-nextchapter-local/logs", desc: "Live-Audit- & Provisionierungslogs abrufen", category: "Flotte" },
-  { id: "instance_pause", method: "POST", path: "/v1/instances/inst-nextchapter-local/pause", desc: "Compute-Container pausieren (Kostenstopp)", category: "Lifecycle" },
-  { id: "instance_start", method: "POST", path: "/v1/instances/inst-nextchapter-local/start", desc: "Pausierte Appliance wieder hochfahren", category: "Lifecycle" },
-];
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -56,10 +38,6 @@ export default function ControlPlanePage() {
   const [companyName, setCompanyName] = useState("");
   const [deployType, setDeployType] = useState<"docker_stack" | "gcp_cloud_run" | "gcp_vm">("docker_stack");
   const [provisioning, setProvisioning] = useState(false);
-
-  // API Testing states
-  const [apiResults, setApiResults] = useState<Record<string, { status: number; ok: boolean; latency_ms: number; data?: any; error?: string; loading?: boolean }>>({});
-  const [testingAll, setTestingAll] = useState(false);
 
   // EXACT themeStyles from Core-Platform
   const themeStyles = {
@@ -326,62 +304,6 @@ export default function ControlPlanePage() {
       return { costVal: cost, costStr: `${cost.toFixed(2)} €`, rateStr: "0,154 € / Std.", detail: "Dedicated e2-std-4 VM" };
     }
     return { costVal: 0, costStr: "0,00 €", rateStr: "0,00 € / Std.", detail: "" };
-  };
-
-  // API Testing logic
-  const handleTestApi = async (api: ApiEndpoint) => {
-    setApiResults((prev) => ({
-      ...prev,
-      [api.id]: { status: 0, ok: false, latency_ms: 0, loading: true },
-    }));
-
-    const start = performance.now();
-    try {
-      const url = `${API_BASE}${api.path}`;
-      const res = await fetch(url, {
-        method: api.method,
-        headers: { "Content-Type": "application/json" },
-        ...(api.defaultPayload && api.method === "POST" ? { body: JSON.stringify(api.defaultPayload) } : {}),
-      });
-      const latency = Math.round(performance.now() - start);
-      let data: any = null;
-      try {
-        data = await res.json();
-      } catch {
-        data = await res.text();
-      }
-
-      setApiResults((prev) => ({
-        ...prev,
-        [api.id]: {
-          status: res.status,
-          ok: res.ok,
-          latency_ms: latency,
-          data,
-          loading: false,
-        },
-      }));
-    } catch (e: any) {
-      const latency = Math.round(performance.now() - start);
-      setApiResults((prev) => ({
-        ...prev,
-        [api.id]: {
-          status: 502,
-          ok: false,
-          latency_ms: latency,
-          error: e.message || String(e),
-          loading: false,
-        },
-      }));
-    }
-  };
-
-  const handleTestAllApis = async () => {
-    setTestingAll(true);
-    for (const api of CONTROL_PLANE_APIS) {
-      await handleTestApi(api);
-    }
-    setTestingAll(false);
   };
 
   const activeCount = instances.filter((i) => i.status === "running").length;
@@ -855,102 +777,10 @@ export default function ControlPlanePage() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 6: APIS (INTERAKTIVER API-TESTER MIT TEST-KNOPF)                      */}
+        {/* TAB 6: APIS (VOLLSTÄNDIGES 1:1 CORE-PLATFORM LAYOUT VIA APIS-PANEL)       */}
         {/* ========================================================================= */}
         {activeTab === "apis" && (
-          <div className="space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
-              <div>
-                <h1 className={`text-lg font-bold ${themeStyles.titleColor}`}>Control Plane REST APIs (Port 8080)</h1>
-                <p className={`text-xs ${themeStyles.subtextColor} mt-1`}>
-                  Flottenverwaltung, Instanz-Lifecycle und automatisierte Bereitstellung live testen.
-                </p>
-              </div>
-              <button
-                onClick={handleTestAllApis}
-                disabled={testingAll}
-                className="px-3.5 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono font-bold shadow-sm transition cursor-pointer disabled:opacity-50"
-              >
-                [ {testingAll ? "Teste alle..." : "⚡ Alle APIs testen"} ]
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {CONTROL_PLANE_APIS.map((api) => {
-                const result = apiResults[api.id];
-                return (
-                  <div
-                    key={api.id}
-                    className={`p-5 rounded-2xl border ${themeStyles.border} ${themeStyles.cardBg} space-y-3 shadow-sm`}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-3 font-mono text-xs">
-                      <div className="flex items-center gap-3">
-                        <span
-                          className={`px-2.5 py-1 rounded font-bold text-[10px] ${
-                            api.method === "GET"
-                              ? "bg-sky-500/10 text-sky-400 border border-sky-500/30"
-                              : api.method === "POST"
-                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
-                              : "bg-rose-500/10 text-rose-400 border border-rose-500/30"
-                          }`}
-                        >
-                          {api.method}
-                        </span>
-                        <span className={`${themeStyles.titleColor} font-bold text-sm`}>{api.path}</span>
-                        <span className={`px-2 py-0.5 rounded text-[10px] ${themeStyles.cardSubBg} ${themeStyles.subtextColor} border ${themeStyles.border}`}>
-                          {api.category}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-3">
-                        {result && (
-                          <div className="flex items-center gap-2 text-[11px]">
-                            <span
-                              className={`px-2 py-0.5 rounded font-bold ${
-                                result.ok
-                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
-                                  : "bg-rose-500/10 text-rose-400 border border-rose-500/30"
-                              }`}
-                            >
-                              {result.status > 0 ? `${result.status} ${result.ok ? "OK" : "ERROR"}` : "FAILED"}
-                            </span>
-                            {result.latency_ms > 0 && (
-                              <span className="text-cyan-400">({result.latency_ms}ms)</span>
-                            )}
-                          </div>
-                        )}
-
-                        <button
-                          onClick={() => handleTestApi(api)}
-                          disabled={result?.loading}
-                          className={`px-3 py-1.5 rounded-lg ${themeStyles.buttonSecondary} text-xs font-bold transition cursor-pointer disabled:opacity-50`}
-                        >
-                          [ {result?.loading ? "Testet..." : "Testen ⚡"} ]
-                        </button>
-                      </div>
-                    </div>
-
-                    <p className={`text-xs ${themeStyles.subtextColor}`}>
-                      {api.desc}
-                    </p>
-
-                    {/* Result Payload Preview */}
-                    {result && !result.loading && (result.data || result.error) && (
-                      <div className={`mt-3 p-3.5 rounded-xl ${themeStyles.cardSubBg} border ${themeStyles.border} font-mono text-[11px] space-y-1`}>
-                        <div className="text-neutral-500 text-[10px] uppercase font-bold flex justify-between items-center">
-                          <span>Live-Antwort (JSON)</span>
-                          <span className="text-neutral-400">Status: {result.status}</span>
-                        </div>
-                        <pre className="overflow-x-auto text-cyan-300 max-h-40 leading-relaxed pt-1">
-                          {result.error ? result.error : JSON.stringify(result.data, null, 2)}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <ApiEndpointsPanel themeStyles={themeStyles} />
         )}
       </main>
     </div>
