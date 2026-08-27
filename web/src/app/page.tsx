@@ -38,6 +38,9 @@ export default function ControlPlanePage() {
   const [companyName, setCompanyName] = useState("");
   const [deployType, setDeployType] = useState<"docker_stack" | "gcp_cloud_run" | "gcp_vm">("docker_stack");
   const [provisioning, setProvisioning] = useState(false);
+  const [availableSkus, setAvailableSkus] = useState<any[]>([]);
+  const [selectedSkus, setSelectedSkus] = useState<string[]>(["process-architect"]);
+
 
   // EXACT themeStyles from Core-Platform
   const themeStyles = {
@@ -152,12 +155,23 @@ export default function ControlPlanePage() {
   const loadInstances = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/v1/instances`);
-      if (res.ok) {
+      const [res, catalogRes] = await Promise.all([
+        fetch(`${API_BASE}/v1/instances`).catch(() => null),
+        fetch(`${API_BASE}/v1/catalog/agents`).catch(() => null),
+      ]);
+
+      if (res && res.ok) {
         const data = await res.json();
         setInstances(data.instances || []);
       } else {
         seedFallbackInstances();
+      }
+
+      if (catalogRes && catalogRes.ok) {
+        const catData = await catalogRes.json();
+        if (Array.isArray(catData) && catData.length > 0) {
+          setAvailableSkus(catData);
+        }
       }
     } catch {
       seedFallbackInstances();
@@ -218,6 +232,7 @@ export default function ControlPlanePage() {
         region: "europe-west3",
         zone: "europe-west3-a",
         machine_type: "e2-standard-4",
+        selected_skus: selectedSkus,
       };
 
       const res = await fetch(`${API_BASE}/v1/instances/provision`, {
@@ -634,6 +649,77 @@ export default function ControlPlanePage() {
                         0,154 € / Std. (24/7 Compute)
                       </div>
                     </button>
+                  </div>
+                </div>
+
+                {/* Fachagenten-Katalog SKU Auswahl */}
+                <div className="pt-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className={`block ${themeStyles.subtextColor} font-bold uppercase`}>
+                      Fachagenten-Lizenzierung (Agenten-Katalog / SKU-Stack)
+                    </label>
+                    <span className="text-[11px] text-cyan-400 font-mono font-bold">
+                      {selectedSkus.length} Agent(en) ausgewählt
+                    </span>
+                  </div>
+                  <p className={`text-[11px] ${themeStyles.subtextColor} mb-3`}>
+                    Wähle die Fachagenten-Hüllen aus dem SKU-Katalog, die beim Start in das isolierte Mandanten-Volume provisioniert werden sollen:
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {(availableSkus.length > 0
+                      ? availableSkus
+                      : [
+                          {
+                            sku: "process-architect",
+                            title: "AI Process Architect & SAP Automation Engine",
+                            version: "1.0.0",
+                            role_type: "consulting_architect",
+                          },
+                        ]
+                    ).map((skuItem: any) => {
+                      const isSelected = selectedSkus.includes(skuItem.sku);
+                      return (
+                        <div
+                          key={skuItem.sku}
+                          onClick={() => {
+                            if (isSelected) {
+                              setSelectedSkus(selectedSkus.filter((s) => s !== skuItem.sku));
+                            } else {
+                              setSelectedSkus([...selectedSkus, skuItem.sku]);
+                            }
+                          }}
+                          className={`p-4 rounded-xl border transition cursor-pointer flex items-start gap-3 ${
+                            isSelected
+                              ? "bg-cyan-950/40 border-cyan-500/80 text-cyan-200"
+                              : `${themeStyles.cardSubBg} ${themeStyles.border} ${themeStyles.subtextColor} hover:border-slate-500`
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {}}
+                            className="mt-1 accent-cyan-500 rounded cursor-pointer"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <strong className="text-xs text-white">{skuItem.title || skuItem.sku}</strong>
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/10 text-slate-300">
+                                v{skuItem.version || "1.0.0"}
+                              </span>
+                            </div>
+                            <div className="text-[10px] font-mono text-cyan-400 mt-0.5">
+                              SKU: {skuItem.sku}
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-1">
+                              {skuItem.sku === "process-architect"
+                                ? "SAP S/4HANA O2C/P2P Prozess-Zerlegung, KI-Triage & Mermaid Flowcharts."
+                                : "Vorkonfigurierte Fachagenten-Schablone mit .gemini/GEMINI.md und Roadmap."}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 

@@ -157,11 +157,12 @@ def provision_local_docker_stack_async(
     company_name: str,
     web_port: int = 8190,
     api_port: int = 8191,
+    selected_skus: Optional[List[str]] = None,
 ) -> None:
     """Startet einen lokalen Docker Stack im Hintergrund und streamt die Logs."""
     thread = threading.Thread(
         target=_provision_local_docker_stack_worker,
-        args=(instance_id, tenant_id, company_name, web_port, api_port),
+        args=(instance_id, tenant_id, company_name, web_port, api_port, selected_skus),
         daemon=True,
     )
     thread.start()
@@ -173,6 +174,7 @@ def _provision_local_docker_stack_worker(
     company_name: str,
     web_port: int,
     api_port: int,
+    selected_skus: Optional[List[str]] = None,
 ) -> None:
     append_log(instance_id, f"🐳 Starte Bereitstellung des Docker-Stacks für '{company_name}' (Port {web_port}/{api_port})...")
     
@@ -187,6 +189,18 @@ def _provision_local_docker_stack_worker(
     try:
         repo_dir = target_dir / "repo"
         _sync_platform_repo(repo_dir, instance_id)
+
+        # Initialisiere Kunden-Projekt-Volume mit ausgewählten SKUs
+        projects_dir = target_dir / "data" / "projects"
+        projects_dir.mkdir(parents=True, exist_ok=True)
+        if selected_skus:
+            catalog_src = Path("/home/peter/Projekte/1130-VIRKI-Agent-Platform/catalog/agents")
+            for sku in selected_skus:
+                sku_src = catalog_src / sku
+                if sku_src.exists() and sku_src.is_dir():
+                    dest = projects_dir / sku
+                    shutil.copytree(sku_src, dest, dirs_exist_ok=True)
+                    append_log(instance_id, f"📦 Fachagent-SKU '{sku}' in Mandanten-Volume provisioniert.")
 
         docker_dir = repo_dir / "deploy" / "docker"
         append_log(instance_id, f"⚙️ Generiere Docker-Compose Konfiguration (Web: {web_port}, API: {api_port})...")
@@ -213,6 +227,7 @@ def _provision_local_docker_stack_worker(
       - AIOS_COMPANY_NAME={company_name}
     volumes:
       - virki-data-{tenant_id}:/app/data
+      - {projects_dir}:/app/active
 
 volumes:
   virki-data-{tenant_id}:
