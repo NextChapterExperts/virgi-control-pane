@@ -119,3 +119,29 @@ def test_install_script_generator():
     assert "virgi-platform-dist.git" in script
     assert "AIOS_TENANT_ID=meister_koch" in script
     assert "8290" in script
+
+
+def test_catalog_agents_endpoint():
+    res = client.get("/v1/catalog/agents")
+    assert res.status_code == 200
+    skus = res.json()
+    assert isinstance(skus, list)
+    assert len(skus) >= 1
+    assert any(s["sku"] == "process-architect" for s in skus)
+
+
+def test_provision_with_selected_skus():
+    payload = {
+        "tenant_id": "sku_test_mandant",
+        "company_name": "SKU Test GmbH",
+        "type": "docker_stack",
+        "web_port": 8490,
+        "api_port": 8491,
+        "selected_skus": ["process-architect"],
+    }
+    res = client.post("/v1/instances/provision", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert "sku-test-mandant" in data["instance"]["tenant_id"]
+

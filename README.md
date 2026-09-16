@@ -103,17 +103,32 @@ Die **VIRKI Control Plane** ist das übergeordnete Betreiber-Werkzeug. Sie dient
 
 ---
 
-## 🚀 4. Schnellstart
+## 🚀 4. Start & Betrieb
 
-### 4.1 Im Docker-Container starten (Standard-Betrieb)
+### 4.1 Synchroner Betrieb im VIRKI Ökosystem (Empfohlen)
+Die Control Plane ist über `systemd --user` Services nahtlos in das Gesamt-Ökosystem eingebunden:
+- `aios-control-plane-backend.service` (Port 8080)
+- `aios-control-plane-web.service` (Port 8280)
+
 ```bash
-cd deploy/docker
-docker compose up -d --build
+# Gesamtes Ökosystem inklusive Control Plane steuern
+/home/peter/Projekte/1000-VIRKI-Umbrella/scripts/virki-stack.sh status
+/home/peter/Projekte/1000-VIRKI-Umbrella/scripts/virki-stack.sh restart
 ```
+
 - **Betreiber-Cockpit:** [`http://localhost:8280`](http://localhost:8280)
 - **REST-API / Swagger Docs:** [`http://localhost:8080/docs`](http://localhost:8080/docs)
 
-### 4.2 Testsuite ausführen
+### 4.2 Manueller Start oder Docker-Container
+```bash
+# Manuell lokal starten
+./scripts/start-control-plane.sh
+
+# Oder im Docker-Container betreiben
+cd deploy/docker && docker compose up -d
+```
+
+### 4.3 Testsuite ausführen
 ```bash
 ./scripts/run-all-tests.sh
 ```

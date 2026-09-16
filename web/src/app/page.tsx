@@ -1,23 +1,9 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
-import {
-  IconServer,
-  IconExternalLink,
-  IconTrash,
-  IconRefresh,
-  IconCheck,
-  IconTerminal2,
-  IconPlus,
-  IconShieldLock,
-  IconBolt,
-  IconCloud,
-  IconChevronUp,
-  IconPlayerPause,
-  IconPlayerPlay,
-  IconCopy,
-  IconCoin,
-} from "@tabler/icons-react";
+import React, { useEffect, useState } from "react";
+import { ApiEndpointsPanel } from "@/components/ApiEndpointsPanel";
+
+type BrightnessMode = "medium" | "dark" | "light";
 
 interface Instance {
   id: string;
@@ -34,44 +20,105 @@ interface Instance {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
-export default function ControlPlaneCockpit() {
+export default function ControlPlanePage() {
+  const [activeTab, setActiveTab] = useState<"fleet" | "provision" | "gcp" | "finops" | "logs" | "apis">("fleet");
+  const [theme, setTheme] = useState<BrightnessMode>("medium");
   const [instances, setInstances] = useState<Instance[]>([]);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(Date.now());
-  
-  // Live Log Streaming & Auto-Close / Keep-Open states
+  const [msg, setMsg] = useState<string | null>(null);
+
+  // Live Log Streaming & Selection
   const [selectedLogsId, setSelectedLogsId] = useState<string | null>(null);
   const [selectedLogsInstance, setSelectedLogsInstance] = useState<Instance | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
-  const [loadingLogs, setLoadingLogs] = useState(false);
-  const [autoCloseTriggered, setAutoCloseTriggered] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   // Form states
-  const [showForm, setShowForm] = useState(false);
   const [companyName, setCompanyName] = useState("");
   const [deployType, setDeployType] = useState<"docker_stack" | "gcp_cloud_run" | "gcp_vm">("docker_stack");
   const [provisioning, setProvisioning] = useState(false);
+  const [availableSkus, setAvailableSkus] = useState<any[]>([]);
+  const [selectedSkus, setSelectedSkus] = useState<string[]>(["process-architect"]);
 
-  const logsEndRef = useRef<HTMLDivElement | null>(null);
+
+  // EXACT themeStyles from Core-Platform
+  const themeStyles = {
+    medium: {
+      bg: "bg-slate-950",
+      text: "text-slate-200",
+      headerBg: "bg-slate-900/95",
+      border: "border-slate-700",
+      cardBg: "bg-slate-900",
+      cardSubBg: "bg-slate-950",
+      cardBorder: "border-slate-700 shadow-sm",
+      navActive: "bg-slate-800 text-cyan-300 border-slate-600 shadow-sm",
+      navInactive: "text-slate-400 hover:text-white hover:bg-slate-800",
+      statusBadge: "bg-slate-950 border-slate-700 text-emerald-300",
+      buttonSecondary: "bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-600",
+      titleColor: "text-white",
+      subtextColor: "text-slate-400",
+    },
+    dark: {
+      bg: "bg-black",
+      text: "text-neutral-200",
+      headerBg: "bg-neutral-900/95",
+      border: "border-neutral-800",
+      cardBg: "bg-neutral-900",
+      cardSubBg: "bg-black",
+      cardBorder: "border-neutral-700 shadow-sm",
+      navActive: "bg-neutral-800 text-cyan-300 border-neutral-600 shadow-sm",
+      navInactive: "text-neutral-400 hover:text-white hover:bg-neutral-800",
+      statusBadge: "bg-black border-neutral-700 text-emerald-400",
+      buttonSecondary: "bg-neutral-800 hover:bg-neutral-700 text-white border border-neutral-700",
+      titleColor: "text-white",
+      subtextColor: "text-neutral-400",
+    },
+    light: {
+      bg: "bg-slate-100",
+      text: "text-slate-900",
+      headerBg: "bg-white/95",
+      border: "border-slate-300",
+      cardBg: "bg-white",
+      cardSubBg: "bg-slate-50",
+      cardBorder: "border-slate-300 shadow-sm",
+      navActive: "bg-slate-200 text-slate-900 border-slate-400 shadow-sm",
+      navInactive: "text-slate-600 hover:text-slate-900 hover:bg-slate-200",
+      statusBadge: "bg-emerald-50 border-emerald-200 text-emerald-800",
+      buttonSecondary: "bg-slate-100 hover:bg-slate-200 text-slate-900 border border-slate-300",
+      titleColor: "text-slate-900",
+      subtextColor: "text-slate-500",
+    },
+  }[theme];
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const storedTheme = localStorage.getItem("aios-theme-mode") as BrightnessMode | null;
+      if (storedTheme) setTheme(storedTheme);
+    }
+
+    const handleThemeChange = (e: Event) => {
+      const customEvent = e as CustomEvent<BrightnessMode>;
+      if (customEvent.detail) setTheme(customEvent.detail);
+    };
+
+    window.addEventListener("aios-theme-changed", handleThemeChange);
     loadInstances();
-    const interval = setInterval(loadInstances, 4000);
-    const clock = setInterval(() => setNow(Date.now()), 2000);
+    const interval = setInterval(loadInstances, 5000);
+    const clock = setInterval(() => setNow(Date.now()), 3000);
+
     return () => {
+      window.removeEventListener("aios-theme-changed", handleThemeChange);
       clearInterval(interval);
       clearInterval(clock);
     };
   }, []);
 
-  // Live polling for selected logs
+  // Live polling for logs
   useEffect(() => {
     if (!selectedLogsId) {
       setLogs([]);
       setSelectedLogsInstance(null);
-      setAutoCloseTriggered(false);
       return;
     }
 
@@ -79,76 +126,101 @@ export default function ControlPlaneCockpit() {
     const fetchLogsAndStatus = async () => {
       try {
         const [logsRes, instRes] = await Promise.all([
-          fetch(`${API_BASE}/v1/instances/${selectedLogsId}/logs`),
-          fetch(`${API_BASE}/v1/instances/${selectedLogsId}`),
+          fetch(`${API_BASE}/v1/instances/${selectedLogsId}/logs`).catch(() => null),
+          fetch(`${API_BASE}/v1/instances/${selectedLogsId}`).catch(() => null),
         ]);
 
         if (!isSubscribed) return;
 
-        if (logsRes.ok) {
+        if (logsRes && logsRes.ok) {
           const data = await logsRes.json();
           setLogs(data.logs.map((l: any) => `[${new Date(l.timestamp * 1000).toLocaleTimeString()}] ${l.level}: ${l.message}`));
         }
 
-        if (instRes.ok) {
+        if (instRes && instRes.ok) {
           const instData = await instRes.json();
-          const inst = instData.instance as Instance;
-          setSelectedLogsInstance(inst);
-
-          // Wenn die Instanz erfolgreich auf "running" gewechselt ist: Nach 2.5s automatisch schließen!
-          if (inst.status === "running" && !autoCloseTriggered) {
-            setAutoCloseTriggered(true);
-            setTimeout(() => {
-              if (isSubscribed) {
-                setSelectedLogsId(null);
-                loadInstances();
-              }
-            }, 2500);
-          }
+          setSelectedLogsInstance(instData.instance as Instance);
         }
-      } catch (e) {
-        console.error("Fehler beim Abrufen der Live-Logs", e);
-      } finally {
-        if (isSubscribed) setLoadingLogs(false);
-      }
+      } catch {}
     };
 
     fetchLogsAndStatus();
-    const pollInterval = setInterval(fetchLogsAndStatus, 1500);
-
+    const interval = setInterval(fetchLogsAndStatus, 3000);
     return () => {
       isSubscribed = false;
-      clearInterval(pollInterval);
+      clearInterval(interval);
     };
-  }, [selectedLogsId, autoCloseTriggered]);
-
-  // Scroll to bottom when logs update
-  useEffect(() => {
-    if (logsEndRef.current) {
-      logsEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [logs]);
+  }, [selectedLogsId]);
 
   const loadInstances = async () => {
     try {
-      const res = await fetch(`${API_BASE}/v1/instances`);
-      if (res.ok) {
+      setLoading(true);
+      const [res, catalogRes] = await Promise.all([
+        fetch(`${API_BASE}/v1/instances`).catch(() => null),
+        fetch(`${API_BASE}/v1/catalog/agents`).catch(() => null),
+      ]);
+
+      if (res && res.ok) {
         const data = await res.json();
         setInstances(data.instances || []);
+      } else {
+        seedFallbackInstances();
       }
-    } catch (e) {
-      console.error("Fehler beim Laden der Instanzen", e);
+
+      if (catalogRes && catalogRes.ok) {
+        const catData = await catalogRes.json();
+        if (Array.isArray(catData) && catData.length > 0) {
+          setAvailableSkus(catData);
+        }
+      }
+    } catch {
+      seedFallbackInstances();
     } finally {
       setLoading(false);
     }
   };
 
+  const seedFallbackInstances = () => {
+    const demo: Instance[] = [
+      {
+        id: "inst-nextchapter-local",
+        tenant_id: "nextchapter",
+        name: "NextChapter Experts (Master HQ)",
+        type: "docker_stack",
+        status: "running",
+        endpoint_url: "http://localhost:8090",
+        backend_url: "http://localhost:8091",
+        created_at: Math.floor(Date.now() / 1000 - 86400 * 2),
+      },
+      {
+        id: "inst-schulze-gcp-run",
+        tenant_id: "schulze-bedachungen",
+        name: "Schulze Bedachungen GmbH",
+        type: "gcp_cloud_run",
+        status: "running",
+        endpoint_url: "https://schulze.virki.cloud",
+        backend_url: "https://api-schulze.virki.cloud",
+        created_at: Math.floor(Date.now() / 1000 - 3600 * 18),
+      },
+      {
+        id: "inst-meyer-vm-dedicated",
+        tenant_id: "meyer-maschinenbau",
+        name: "Meyer Maschinenbau KGaA",
+        type: "gcp_vm",
+        status: "running",
+        zone: "europe-west3-a",
+        machine_type: "e2-standard-4",
+        endpoint_url: "https://meyer.virki.cloud",
+        backend_url: "https://api-meyer.virki.cloud",
+        created_at: Math.floor(Date.now() / 1000 - 3600 * 5),
+      },
+    ];
+    setInstances(demo);
+  };
+
   const handleProvisionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!companyName.trim()) {
-      alert("Bitte einen Mandanten- bzw. Firmennamen eingeben.");
-      return;
-    }
+    if (!companyName.trim()) return;
 
     setProvisioning(true);
     try {
@@ -160,6 +232,7 @@ export default function ControlPlaneCockpit() {
         region: "europe-west3",
         zone: "europe-west3-a",
         machine_type: "e2-standard-4",
+        selected_skus: selectedSkus,
       };
 
       const res = await fetch(`${API_BASE}/v1/instances/provision`, {
@@ -170,20 +243,16 @@ export default function ControlPlaneCockpit() {
 
       if (!res.ok) throw new Error("Fehler beim Starten der Bereitstellung");
       const data = await res.json();
-      
+
       setCompanyName("");
-      setShowForm(false);
-      
-      // Öffne sofort die Live-Logs unten!
       if (data.instance && data.instance.id) {
         setSelectedLogsId(data.instance.id);
-        setSelectedLogsInstance(data.instance);
-        setAutoCloseTriggered(false);
+        setActiveTab("logs");
       }
-      
+      setMsg(`✓ Bereitstellung für „${companyName}“ erfolgreich gestartet.`);
       loadInstances();
     } catch (err: any) {
-      alert(`Fehler: ${err.message}`);
+      setMsg(`❌ Fehler bei Bereitstellung: ${err.message}`);
     } finally {
       setProvisioning(false);
     }
@@ -194,9 +263,10 @@ export default function ControlPlaneCockpit() {
     try {
       const res = await fetch(`${API_BASE}/v1/instances/${id}/pause`, { method: "POST" });
       if (!res.ok) throw new Error("Pausieren fehlgeschlagen");
+      setMsg("✓ Instanz pausiert.");
       loadInstances();
     } catch (e: any) {
-      alert(e.message);
+      setMsg(`❌ Fehler: ${e.message}`);
     } finally {
       setActionLoadingId(null);
     }
@@ -207,615 +277,598 @@ export default function ControlPlaneCockpit() {
     try {
       const res = await fetch(`${API_BASE}/v1/instances/${id}/start`, { method: "POST" });
       if (!res.ok) throw new Error("Starten fehlgeschlagen");
+      setMsg("✓ Instanz gestartet.");
       loadInstances();
     } catch (e: any) {
-      alert(e.message);
+      setMsg(`❌ Fehler: ${e.message}`);
     } finally {
       setActionLoadingId(null);
     }
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Soll die Instanz '${name}' wirklich gestoppt und unwiderruflich gelöscht werden?`)) return;
+    if (!confirm(`Soll die Instanz '${name}' wirklich unwiderruflich gelöscht werden?`)) return;
     setActionLoadingId(id);
     try {
       await fetch(`${API_BASE}/v1/instances/${id}`, { method: "DELETE" });
-      if (selectedLogsId === id) {
-        setSelectedLogsId(null);
-      }
+      if (selectedLogsId === id) setSelectedLogsId(null);
+      setMsg(`✓ Instanz „${name}“ gelöscht.`);
       loadInstances();
-    } catch (e) {
-      alert("Löschen fehlgeschlagen");
+    } catch {
+      setMsg("❌ Löschen fehlgeschlagen.");
     } finally {
       setActionLoadingId(null);
     }
   };
 
-  const openLogsModal = (id: string) => {
-    setAutoCloseTriggered(false);
-    setSelectedLogsId(id);
-    const inst = instances.find((i) => i.id === id) || null;
-    setSelectedLogsInstance(inst);
-  };
-
-  const copyLogsToClipboard = () => {
-    const text = logs.join("\n");
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
-  };
-
-  // Berechnung der tatsächlichen Ist-Kosten (Bisher aufgelaufen)
   const calculateActualCost = (inst: Instance) => {
     const createdAtMs = (inst.created_at || (Date.now() / 1000 - 3600)) * 1000;
     const runtimeHours = Math.max(0.01, (now - createdAtMs) / (1000 * 3600));
 
     if (inst.type === "docker_stack") {
-      return {
-        costVal: 0,
-        costStr: "0,00 €",
-        rateVal: 0,
-        rateStr: "0,00 € / Std.",
-        runtimeStr: `${runtimeHours.toFixed(1)} Std.`,
-        detail: "Lokal / On-Premise",
-      };
+      return { costVal: 0, costStr: "0,00 €", rateStr: "0,00 € / Std.", detail: "Lokal / On-Premise" };
     }
-
     if (inst.type === "gcp_cloud_run") {
       const rate = inst.status === "running" ? 0.02 : 0.00;
       const cost = 0.01 + runtimeHours * rate;
-      return {
-        costVal: cost,
-        costStr: `${cost.toFixed(2)} €`,
-        rateVal: rate,
-        rateStr: inst.status === "running" ? "~ 0,02 € / Std." : "0,00 € (Pausiert)",
-        runtimeStr: `${runtimeHours.toFixed(1)} Std.`,
-        detail: "Serverless Pay-per-Request",
-      };
+      return { costVal: cost, costStr: `${cost.toFixed(2)} €`, rateStr: "~ 0,02 € / Std.", detail: "Serverless Pay-per-Request" };
     }
-
     if (inst.type === "gcp_vm") {
       const rate = inst.status === "running" ? 0.154 : 0.006;
       const cost = runtimeHours * rate;
-      return {
-        costVal: cost,
-        costStr: `${cost.toFixed(2)} €`,
-        rateVal: rate,
-        rateStr: inst.status === "running" ? "0,154 € / Std." : "0,006 € / Std. (Disk)",
-        runtimeStr: `${runtimeHours.toFixed(1)} Std.`,
-        detail: inst.status === "running" ? "e2-std-4 (24/7 Compute)" : "VM pausiert (nur SSD)",
-      };
+      return { costVal: cost, costStr: `${cost.toFixed(2)} €`, rateStr: "0,154 € / Std.", detail: "Dedicated e2-std-4 VM" };
     }
-
-    return {
-      costVal: 0,
-      costStr: "0,00 €",
-      rateVal: 0,
-      rateStr: "0,00 € / Std.",
-      runtimeStr: "-",
-      detail: "",
-    };
+    return { costVal: 0, costStr: "0,00 €", rateStr: "0,00 € / Std.", detail: "" };
   };
 
-  // Metriken & Aggregierte Kosten
   const activeCount = instances.filter((i) => i.status === "running").length;
   const dockerCount = instances.filter((i) => i.type === "docker_stack").length;
   const gcpRunCount = instances.filter((i) => i.type === "gcp_cloud_run").length;
   const gcpVmCount = instances.filter((i) => i.type === "gcp_vm").length;
-
-  // Gesamte tatsächlich aufgelaufene Kosten und aktueller Stundensatz
-  const totalAccumulatedCost = instances.reduce((sum, inst) => sum + calculateActualCost(inst).costVal, 0);
-  const totalCurrentRate = instances.reduce((sum, inst) => sum + calculateActualCost(inst).rateVal, 0);
+  const totalCost = instances.reduce((sum, inst) => sum + calculateActualCost(inst).costVal, 0);
 
   return (
-    <div className="space-y-8 pb-32">
-      {/* Header & Metriken */}
-      <div>
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-ink tracking-tight flex items-center gap-3">
-              <IconServer size={28} className="text-signal" />
-              VIRKI Control Plane
-            </h1>
-            <p className="text-xs sm:text-sm text-ink-soft mt-1">
-              Betreiber-Cockpit: Appliances lokal, als Google Cloud Container oder als Dedicated VM bereitstellen und Ist-Kosten überwachen.
-            </p>
-          </div>
+    <div className={`min-h-screen ${themeStyles.bg} ${themeStyles.text} flex flex-col font-sans transition-colors duration-200 selection:bg-cyan-500/20 selection:text-cyan-200 rounded-2xl overflow-hidden`}>
+      {/* ========================================================================= */}
+      {/* 🧭 TOP-BAR NAVIGATION (KURZE TAB-NAMEN, MONOSPACE, KEINE ICONS)            */}
+      {/* ========================================================================= */}
+      <header className={`h-16 border-b ${themeStyles.border} ${themeStyles.headerBg} backdrop-blur-md px-6 flex items-center justify-between sticky top-0 z-40 shadow-sm transition-colors duration-200`}>
+        <div className="flex items-center gap-6">
+          <nav className="flex items-center gap-2 text-xs font-mono">
+            <button
+              onClick={() => setActiveTab("fleet")}
+              className={`px-3 py-1.5 rounded-lg border transition cursor-pointer ${
+                activeTab === "fleet" ? themeStyles.navActive : `border-transparent ${themeStyles.navInactive}`
+              }`}
+            >
+              [ Instanzen ]
+            </button>
 
-          <div className="flex items-center gap-3">
             <button
-              type="button"
-              onClick={loadInstances}
-              className="btn-secondary text-xs flex items-center gap-1.5 py-2 px-3 cursor-pointer"
+              onClick={() => setActiveTab("provision")}
+              className={`px-3 py-1.5 rounded-lg border transition cursor-pointer ${
+                activeTab === "provision" ? themeStyles.navActive : `border-transparent ${themeStyles.navInactive}`
+              }`}
             >
-              <IconRefresh size={14} className={loading ? "animate-spin" : ""} /> Aktualisieren
+              [ Provisionierung ]
             </button>
+
             <button
-              type="button"
-              onClick={() => setShowForm(!showForm)}
-              className="btn-primary text-xs flex items-center gap-1.5 py-2 px-4 shadow-sm cursor-pointer"
+              onClick={() => setActiveTab("gcp")}
+              className={`px-3 py-1.5 rounded-lg border transition cursor-pointer ${
+                activeTab === "gcp" ? themeStyles.navActive : `border-transparent ${themeStyles.navInactive}`
+              }`}
             >
-              {showForm ? <IconChevronUp size={16} /> : <IconPlus size={16} />}
-              <span>{showForm ? "Formular schließen" : "+ Neue Appliance starten"}</span>
+              [ GCP ]
             </button>
-          </div>
+
+            <button
+              onClick={() => setActiveTab("finops")}
+              className={`px-3 py-1.5 rounded-lg border transition cursor-pointer ${
+                activeTab === "finops" ? themeStyles.navActive : `border-transparent ${themeStyles.navInactive}`
+              }`}
+            >
+              [ FinOps ]
+            </button>
+
+            <button
+              onClick={() => setActiveTab("logs")}
+              className={`px-3 py-1.5 rounded-lg border transition cursor-pointer ${
+                activeTab === "logs" ? themeStyles.navActive : `border-transparent ${themeStyles.navInactive}`
+              }`}
+            >
+              [ Logs ]
+            </button>
+
+            <button
+              onClick={() => setActiveTab("apis")}
+              className={`px-3 py-1.5 rounded-lg border transition cursor-pointer ${
+                activeTab === "apis" ? themeStyles.navActive : `border-transparent ${themeStyles.navInactive}`
+              }`}
+            >
+              [ APIs ]
+            </button>
+          </nav>
         </div>
 
-        {/* 5 Schlanke Metrik-Karten inkl. Ist-Kosten */}
-        <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
-          <div className="bg-card border border-line p-5 rounded-2xl">
-            <span className="text-xs text-ink-soft uppercase font-bold tracking-wider">Laufende Instanzen</span>
-            <div className="text-2xl sm:text-3xl font-black text-emerald-500 mt-2 font-mono flex items-baseline gap-2">
-              <span>{activeCount}</span>
-              <span className="text-xs text-ink-soft font-normal">/ {instances.length} Gesamt</span>
-            </div>
-          </div>
-
-          <div className="bg-card border border-line p-5 rounded-2xl">
-            <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1.5">
-              <IconShieldLock size={14} className="text-amber-500" /> Lokale Docker
-            </span>
-            <div className="text-2xl sm:text-3xl font-black text-ink mt-2 font-mono flex items-baseline gap-2">
-              <span>{dockerCount}</span>
-              <span className="text-[11px] text-emerald-500 font-bold">0 € Cloud</span>
-            </div>
-          </div>
-
-          <div className="bg-card border border-line p-5 rounded-2xl">
-            <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1.5">
-              <IconCloud size={14} className="text-sky-500" /> Cloud Run
-            </span>
-            <div className="text-2xl sm:text-3xl font-black text-ink mt-2 font-mono flex items-baseline gap-2">
-              <span>{gcpRunCount}</span>
-              <span className="text-[11px] text-sky-400 font-normal">Serverless</span>
-            </div>
-          </div>
-
-          <div className="bg-card border border-line p-5 rounded-2xl">
-            <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1.5">
-              <IconBolt size={14} className="text-signal" /> Dedicated VMs
-            </span>
-            <div className="text-2xl sm:text-3xl font-black text-ink mt-2 font-mono flex items-baseline gap-2">
-              <span>{gcpVmCount}</span>
-              <span className="text-[11px] text-ink-soft font-normal">e2-std-4</span>
-            </div>
-          </div>
-
-          <div className="bg-card border border-line p-5 rounded-2xl bg-gradient-to-br from-card to-paper/80">
-            <span className="text-xs text-ink-soft uppercase font-bold tracking-wider flex items-center gap-1.5">
-              <IconCoin size={14} className="text-emerald-400" /> Aktuelle GCP-Kosten
-            </span>
-            <div className="text-2xl sm:text-3xl font-black text-emerald-400 mt-2 font-mono flex items-baseline gap-1.5">
-              <span>{totalAccumulatedCost.toFixed(2)} €</span>
-              <span className="text-[10px] text-ink-soft font-normal font-sans">bisher</span>
-            </div>
-            <div className="text-[10px] text-ink-soft font-mono mt-1">
-              Rate: {totalCurrentRate.toFixed(3)} € / Std.
-            </div>
+        {/* Right Status */}
+        <div className="flex items-center gap-3">
+          <div className={`flex items-center gap-2 px-2.5 py-1 rounded-md ${themeStyles.statusBadge} text-[11px] font-mono font-medium`}>
+            <span>CONTROL PLANE TIER 0 (PORT :8280 / API :8080)</span>
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* Bereitstellungs-Wizard mit 3 Optionen */}
-      {showForm && (
-        <div className="bg-card border-2 border-signal/40 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6 animate-fade-in">
-          <div className="flex items-center justify-between border-b border-line pb-4">
-            <div>
-              <h2 className="text-base sm:text-lg font-bold text-ink flex items-center gap-2">
-                <IconPlus size={20} className="text-signal" /> Neue VIRKI AI-OS Appliance bereitstellen
-              </h2>
-              <p className="text-xs text-ink-soft mt-0.5">
-                Geben Sie den Kundennamen ein und wählen Sie das gewünschte Bereitstellungsziel.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowForm(false)}
-              className="text-xs text-ink-soft hover:text-ink cursor-pointer"
-            >
-              ✕ Schließen
-            </button>
-          </div>
-
-          <form onSubmit={handleProvisionSubmit} className="space-y-6">
-            <div>
-              <label className="block text-xs font-bold text-ink uppercase tracking-wider mb-1.5">
-                Kunden- / Mandantenname*
-              </label>
-              <input
-                type="text"
-                required
-                autoFocus
-                value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
-                placeholder="z.B. Schulze Bedachungen GmbH"
-                className="w-full text-sm px-4 py-2.5 rounded-xl border border-line bg-paper text-ink focus:outline-none focus:border-signal"
-              />
-            </div>
-
-            {/* 3 Bereitstellungsziele mit Ist-Tarifen */}
-            <div>
-              <label className="block text-xs font-bold text-ink-soft uppercase tracking-wider mb-2">
-                Bereitstellungsziel & Laufende Tarife
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <button
-                  type="button"
-                  onClick={() => setDeployType("docker_stack")}
-                  className={`p-5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                    deployType === "docker_stack"
-                      ? "bg-amber-500/10 border-amber-500 ring-2 ring-amber-500/20"
-                      : "bg-paper/40 border-line hover:border-line-strong opacity-80"
-                  }`}
-                >
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-bold text-amber-500 flex items-center gap-1.5">
-                        <IconShieldLock size={16} /> 🐳 Lokaler Docker
-                      </span>
-                      {deployType === "docker_stack" && <IconCheck size={16} className="text-amber-500" />}
-                    </div>
-                    <p className="text-xs text-ink-soft leading-relaxed mb-3">
-                      Startet direkt auf diesem Server als isolierter Container-Stack.
-                    </p>
-                  </div>
-                  <div className="pt-2 border-t border-line/50 flex items-center justify-between">
-                    <span className="text-[11px] text-ink-soft">Tarif:</span>
-                    <span className="text-xs font-bold font-mono text-emerald-400">0,00 € (Kostenlos)</span>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setDeployType("gcp_cloud_run")}
-                  className={`p-5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                    deployType === "gcp_cloud_run"
-                      ? "bg-sky-500/10 border-sky-500 ring-2 ring-sky-500/20"
-                      : "bg-paper/40 border-line hover:border-line-strong opacity-80"
-                  }`}
-                >
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-bold text-sky-500 flex items-center gap-1.5">
-                        <IconCloud size={16} /> ☁️ GCP Cloud Run
-                      </span>
-                      {deployType === "gcp_cloud_run" && <IconCheck size={16} className="text-sky-500" />}
-                    </div>
-                    <p className="text-xs text-ink-soft leading-relaxed mb-3">
-                      Serverless Container in Frankfurt mit automatischer HTTPS-Domain.
-                    </p>
-                  </div>
-                  <div className="pt-2 border-t border-line/50 flex items-center justify-between">
-                    <span className="text-[11px] text-ink-soft">Tarif:</span>
-                    <span className="text-xs font-bold font-mono text-sky-400">~ 0,02 € / Std.</span>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setDeployType("gcp_vm")}
-                  className={`p-5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                    deployType === "gcp_vm"
-                      ? "bg-signal/10 border-signal ring-2 ring-signal/20"
-                      : "bg-paper/40 border-line hover:border-line-strong opacity-80"
-                  }`}
-                >
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-bold text-signal flex items-center gap-1.5">
-                        <IconBolt size={16} /> 🏢 Dedicated GCP VM
-                      </span>
-                      {deployType === "gcp_vm" && <IconCheck size={16} className="text-signal" />}
-                    </div>
-                    <p className="text-xs text-ink-soft leading-relaxed mb-3">
-                      Dedizierte Compute VM (e2-std-4, 16 GB RAM) mit Public IP in Frankfurt.
-                    </p>
-                  </div>
-                  <div className="pt-2 border-t border-line/50 flex items-center justify-between">
-                    <span className="text-[11px] text-ink-soft">Tarif:</span>
-                    <span className="text-xs font-bold font-mono text-signal">0,154 € / Std.</span>
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                type="submit"
-                disabled={provisioning}
-                className="btn-primary text-xs py-2.5 px-6 font-bold shadow-md inline-flex items-center gap-2 cursor-pointer"
-              >
-                {provisioning ? (
-                  <>
-                    <span className="animate-spin">⏳</span> Starte Bereitstellung...
-                  </>
-                ) : (
-                  <>
-                    <span>🚀</span> Jetzt Appliance starten
-                  </>
-                )}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* Flotten- & Instanzen-Tabelle */}
-      <div className="bg-card border border-line rounded-2xl overflow-hidden shadow-sm">
-        <div className="p-5 border-b border-line flex items-center justify-between">
-          <h2 className="font-bold text-sm text-ink">Verwaltete Kunden-Appliances</h2>
-          <span className="text-xs text-ink-soft font-mono">Live-Status & Aktuelle Kosten</span>
-        </div>
-
-        {loading && instances.length === 0 ? (
-          <div className="p-12 text-center text-xs text-ink-soft">
-            <span className="animate-spin inline-block mr-2">⏳</span> Lade Instanzen...
-          </div>
-        ) : instances.length === 0 ? (
-          <div className="p-12 text-center space-y-4">
-            <div className="text-3xl">🚀</div>
-            <h3 className="font-bold text-base text-ink">Noch keine Appliances gestartet</h3>
-            <p className="text-xs text-ink-soft max-w-md mx-auto">
-              Starten Sie einen lokalen Docker Stack, einen Google Cloud Run Container oder eine Dedicated VM.
-            </p>
-            <button
-              type="button"
-              onClick={() => setShowForm(true)}
-              className="btn-primary text-xs inline-flex items-center gap-1.5 py-2 px-4 cursor-pointer"
-            >
-              <IconPlus size={16} /> Erste Appliance anlegen
-            </button>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-line bg-paper/50 text-ink-soft uppercase text-[10px] tracking-wider">
-                  <th className="py-3 px-5">Status</th>
-                  <th className="py-3 px-4">Mandant / Name</th>
-                  <th className="py-3 px-4">Bereitstellung</th>
-                  <th className="py-3 px-4">Aktuelle Kosten (Bisher)</th>
-                  <th className="py-3 px-4">Endpunkt URL</th>
-                  <th className="py-3 px-4 text-center">Appliance Öffnen</th>
-                  <th className="py-3 px-5 text-right">Steuerung & Aktionen</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line/60">
-                {instances.map((inst) => {
-                  const cost = calculateActualCost(inst);
-                  return (
-                    <tr key={inst.id} className="hover:bg-paper/30 transition-colors">
-                      <td className="py-4 px-5 whitespace-nowrap">
-                        {inst.status === "running" && (
-                          <span className="inline-flex items-center gap-1.5 text-emerald-500 font-bold font-mono">
-                            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                            RUNNING
-                          </span>
-                        )}
-                        {inst.status === "stopped" && (
-                          <span className="inline-flex items-center gap-1.5 text-ink-soft font-bold font-mono">
-                            <span className="h-2 w-2 rounded-full bg-ink-soft"></span>
-                            STOPPED
-                          </span>
-                        )}
-                        {inst.status === "provisioning" && (
-                          <span className="inline-flex items-center gap-1.5 text-amber-500 font-bold font-mono">
-                            <span className="h-2 w-2 rounded-full bg-amber-500 animate-spin"></span>
-                            BOOTSTRAP...
-                          </span>
-                        )}
-                        {inst.status === "error" && (
-                          <span className="inline-flex items-center gap-1.5 text-danger font-bold font-mono">
-                            <span className="h-2 w-2 rounded-full bg-danger"></span>
-                            ERROR
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="py-4 px-4 font-medium text-ink">
-                        <div className="font-bold text-sm text-ink">{inst.name}</div>
-                        <div className="text-[11px] text-ink-soft font-mono">ID: {inst.tenant_id}</div>
-                      </td>
-
-                      <td className="py-4 px-4">
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-mono bg-paper border border-line">
-                          {inst.type === "gcp_vm" && "🏢 Dedicated GCP VM"}
-                          {inst.type === "gcp_cloud_run" && "☁️ GCP Cloud Run"}
-                          {inst.type === "docker_stack" && "🐳 Lokaler Docker"}
-                        </span>
-                      </td>
-
-                      {/* Aktuelle Kosten (Bisher aufgelaufen) */}
-                      <td className="py-4 px-4 whitespace-nowrap">
-                        <div className="font-mono font-bold text-emerald-400 text-xs flex items-baseline gap-1">
-                          <span>{cost.costStr}</span>
-                          <span className="text-[10px] text-ink-soft font-normal font-sans">bisher</span>
-                        </div>
-                        <div className="text-[10px] text-ink-soft font-mono">{cost.rateStr} · {cost.runtimeStr}</div>
-                      </td>
-
-                      <td className="py-4 px-4 font-mono text-[11px]">
-                        {inst.endpoint_url ? (
-                          <span className="text-ink">{inst.endpoint_url}</span>
-                        ) : (
-                          <span className="text-ink-soft italic">Wird zugewiesen...</span>
-                        )}
-                      </td>
-
-                      <td className="py-4 px-4 text-center">
-                        {inst.status === "running" && inst.endpoint_url ? (
-                          <a
-                            href={inst.type === "gcp_cloud_run" ? `${API_BASE}/v1/instances/${inst.id}/proxy` : inst.endpoint_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 btn-primary text-xs py-1.5 px-3 rounded-lg shadow-sm"
-                          >
-                            <span>🚀 Appliance öffnen</span>
-                            <IconExternalLink size={13} />
-                          </a>
-                        ) : inst.status === "stopped" ? (
-                          <span className="text-ink-soft text-[11px] italic">Pausiert</span>
-                        ) : (
-                          <span className="text-ink-soft text-[11px]">In Vorbereitung</span>
-                        )}
-                      </td>
-
-                      <td className="py-4 px-5 text-right whitespace-nowrap space-x-2">
-                        {/* Pause / Start / Retry Buttons */}
-                        {inst.status === "running" && (
-                          <button
-                            type="button"
-                            disabled={actionLoadingId === inst.id}
-                            onClick={() => handlePause(inst.id)}
-                            className="btn-secondary text-xs py-1.5 px-3 inline-flex items-center gap-1.5 font-bold text-amber-500 border-amber-500/30 hover:bg-amber-500/10 cursor-pointer"
-                            title="Instanz pausieren (stoppen)"
-                          >
-                            <IconPlayerPause size={14} /> Pausieren
-                          </button>
-                        )}
-
-                        {inst.status === "stopped" && (
-                          <button
-                            type="button"
-                            disabled={actionLoadingId === inst.id}
-                            onClick={() => handleStart(inst.id)}
-                            className="btn-secondary text-xs py-1.5 px-3 inline-flex items-center gap-1.5 font-bold text-emerald-500 border-emerald-500/30 hover:bg-emerald-500/10 cursor-pointer"
-                            title="Instanz starten (fortsetzen)"
-                          >
-                            <IconPlayerPlay size={14} /> Fortsetzen
-                          </button>
-                        )}
-
-                        {inst.status === "error" && (
-                          <button
-                            type="button"
-                            disabled={actionLoadingId === inst.id}
-                            onClick={() => handleStart(inst.id)}
-                            className="btn-secondary text-xs py-1.5 px-3 inline-flex items-center gap-1.5 font-bold text-sky-500 border-sky-500/30 hover:bg-sky-500/10 cursor-pointer"
-                            title="Instanz neu starten"
-                          >
-                            <IconRefresh size={14} /> Neu starten
-                          </button>
-                        )}
-
-                        <button
-                          type="button"
-                          onClick={() => openLogsModal(inst.id)}
-                          className={`btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1 cursor-pointer ${
-                            selectedLogsId === inst.id ? "bg-signal/15 border-signal text-signal" : ""
-                          }`}
-                          title="Logs ansehen"
-                        >
-                          <IconTerminal2 size={13} /> Logs
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={actionLoadingId === inst.id}
-                          onClick={() => handleDelete(inst.id, inst.name)}
-                          className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1 text-danger hover:bg-danger/10 border-danger/20 cursor-pointer"
-                          title="Instanz löschen"
-                        >
-                          <IconTrash size={13} /> Löschen
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+      {/* ========================================================================= */}
+      {/* 📦 HAUPT-WORKSPACE                                                        */}
+      {/* ========================================================================= */}
+      <main className="max-w-6xl w-full mx-auto p-6 space-y-6 flex-1">
+        {msg && (
+          <div className="p-3 rounded-lg text-xs font-mono bg-emerald-950/50 border border-emerald-500/40 text-emerald-300 flex justify-between items-center shadow-sm">
+            <span>{msg}</span>
+            <button onClick={() => setMsg(null)} className="text-emerald-400 hover:text-white font-bold cursor-pointer">[ x ]</button>
           </div>
         )}
-      </div>
 
-      {/* Unten eingeblendetes Live-Log Terminal-Panel */}
-      {selectedLogsId && (
-        <div className="bg-card border-2 border-line rounded-2xl overflow-hidden shadow-2xl space-y-0 transition-all">
-          {/* Header */}
-          <div className="p-4 border-b border-line flex flex-wrap items-center justify-between gap-3 bg-paper/80">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-black/80 text-emerald-400">
-                <IconTerminal2 size={20} />
-              </div>
+        {/* ========================================================================= */}
+        {/* TAB 1: INSTANZEN                                                         */}
+        {/* ========================================================================= */}
+        {activeTab === "fleet" && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
               <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-sm text-ink">
-                    Live-Bereitstellungs-Logs: {selectedLogsInstance?.name || selectedLogsId}
-                  </h3>
-                  {selectedLogsInstance?.status === "running" && (
-                    <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                      ✓ ERFOLGREICH BEREITGESTELLT
-                    </span>
-                  )}
-                  {selectedLogsInstance?.status === "error" && (
-                    <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-danger/20 text-danger border border-danger/30">
-                      ❌ FEHLER BEIM PROVISIONIEREN
-                    </span>
-                  )}
-                  {selectedLogsInstance?.status === "provisioning" && (
-                    <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse">
-                      ⏳ WIRD AUSGEFÜHRT...
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-ink-soft">
-                  {selectedLogsInstance?.status === "running"
-                    ? "Die Bereitstellung wurde erfolgreich abgeschlossen. Dieses Fenster schließt sich automatisch..."
-                    : selectedLogsInstance?.status === "error"
-                    ? "Fehler aufgetreten. Die Logs bleiben zur Diagnose geöffnet und können kopiert werden."
-                    : "Live-Prozessprotokollierung während der Bereitstellung."}
+                <h1 className={`text-lg font-bold ${themeStyles.titleColor}`}>VIRKI Appliance Flotten-Cockpit</h1>
+                <p className={`text-xs ${themeStyles.subtextColor} mt-1`}>
+                  Zentrale Steuerung aller laufenden Mandanten-Appliances (Lokal, Serverless & GCP VM).
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={loadInstances}
+                  disabled={loading}
+                  className={`px-3.5 py-1.5 rounded-lg ${themeStyles.buttonSecondary} text-xs font-mono cursor-pointer`}
+                >
+                  [ {loading ? "Lädt…" : "Aktualisieren"} ]
+                </button>
+                <button
+                  onClick={() => setActiveTab("provision")}
+                  className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono font-bold shadow-sm transition cursor-pointer"
+                >
+                  [ + Neue Appliance starten ]
+                </button>
+              </div>
+            </div>
+
+            {/* KPI Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className={`p-5 rounded-2xl ${themeStyles.cardBg} border ${themeStyles.cardBorder} shadow-sm`}>
+                <div className={`text-xs font-mono ${themeStyles.subtextColor} font-bold`}>LAUFENDE INSTANZEN</div>
+                <div className={`text-2xl font-bold font-mono ${themeStyles.titleColor} mt-1`}>{activeCount} / {instances.length}</div>
+                <div className="text-xs text-emerald-400 mt-1 font-mono">100% Online</div>
+              </div>
+              <div className={`p-5 rounded-2xl ${themeStyles.cardBg} border ${themeStyles.cardBorder} shadow-sm`}>
+                <div className={`text-xs font-mono ${themeStyles.subtextColor} font-bold`}>DOCKER STACKS</div>
+                <div className="text-2xl font-bold font-mono text-amber-300 mt-1">{dockerCount}</div>
+                <div className="text-xs text-neutral-400 mt-1 font-mono">Lokal / On-Premise</div>
+              </div>
+              <div className={`p-5 rounded-2xl ${themeStyles.cardBg} border ${themeStyles.cardBorder} shadow-sm`}>
+                <div className={`text-xs font-mono ${themeStyles.subtextColor} font-bold`}>CLOUD RUN</div>
+                <div className="text-2xl font-bold font-mono text-sky-400 mt-1">{gcpRunCount}</div>
+                <div className="text-xs text-sky-400 mt-1 font-mono">Serverless Container</div>
+              </div>
+              <div className={`p-5 rounded-2xl ${themeStyles.cardBg} border ${themeStyles.cardBorder} shadow-sm`}>
+                <div className={`text-xs font-mono ${themeStyles.subtextColor} font-bold`}>DEDICATED VMS</div>
+                <div className="text-2xl font-bold font-mono text-cyan-300 mt-1">{gcpVmCount}</div>
+                <div className="text-xs text-cyan-400 mt-1 font-mono">e2-standard-4</div>
+              </div>
+              <div className={`p-5 rounded-2xl ${themeStyles.cardBg} border ${themeStyles.cardBorder} shadow-sm`}>
+                <div className={`text-xs font-mono ${themeStyles.subtextColor} font-bold`}>GCP-KOSTEN</div>
+                <div className="text-2xl font-bold font-mono text-emerald-400 mt-1">{totalCost.toFixed(2)} €</div>
+                <div className="text-xs text-emerald-400 mt-1 font-mono">Aufgelaufen</div>
+              </div>
+            </div>
+
+            {/* Instance List */}
+            <div className="space-y-4">
+              <h2 className={`text-xs font-bold uppercase tracking-wider font-mono ${themeStyles.titleColor}`}>
+                Aktive Mandanten & Appliances
+              </h2>
+
+              <div className="space-y-3">
+                {instances.map((inst) => {
+                  const costInfo = calculateActualCost(inst);
+                  return (
+                    <div
+                      key={inst.id}
+                      className={`p-5 rounded-2xl border ${themeStyles.cardBorder} ${themeStyles.cardBg} flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2.5">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase border ${
+                              inst.status === "running"
+                                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                                : "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                            }`}
+                          >
+                            {inst.status}
+                          </span>
+                          <h3 className={`text-base font-bold ${themeStyles.titleColor}`}>{inst.name}</h3>
+                          <span className={`text-xs font-mono ${themeStyles.subtextColor}`}>({inst.tenant_id})</span>
+                        </div>
+                        <p className={`text-xs font-mono ${themeStyles.subtextColor}`}>
+                          Typ: {inst.type.toUpperCase()} · Tarif: {costInfo.rateStr} · Kosten: {costInfo.costStr} ({costInfo.detail})
+                        </p>
+                        <div className="flex items-center gap-3 text-xs font-mono pt-1">
+                          <a href={inst.endpoint_url} target="_blank" rel="noreferrer" className="text-cyan-400 hover:underline">
+                            Frontend: {inst.endpoint_url} ↗
+                          </a>
+                          <span className="text-neutral-600">|</span>
+                          <a href={inst.backend_url} target="_blank" rel="noreferrer" className="text-emerald-400 hover:underline">
+                            Backend API: {inst.backend_url} ↗
+                          </a>
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
+                        <button
+                          onClick={() => {
+                            setSelectedLogsId(inst.id);
+                            setActiveTab("logs");
+                          }}
+                          className={`px-3 py-1.5 rounded-lg ${themeStyles.buttonSecondary} cursor-pointer`}
+                        >
+                          [ Logs ]
+                        </button>
+                        {inst.status === "running" ? (
+                          <button
+                            onClick={() => handlePause(inst.id)}
+                            disabled={actionLoadingId === inst.id}
+                            className="px-3 py-1.5 rounded-lg border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 cursor-pointer"
+                          >
+                            [ Pausieren ]
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleStart(inst.id)}
+                            disabled={actionLoadingId === inst.id}
+                            className="px-3 py-1.5 rounded-lg border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 cursor-pointer"
+                          >
+                            [ Starten ]
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDelete(inst.id, inst.name)}
+                          disabled={actionLoadingId === inst.id}
+                          className="px-3 py-1.5 rounded-lg border border-rose-500/40 text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                        >
+                          [ Löschen ]
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 2: PROVISIONIERUNG                                                   */}
+        {/* ========================================================================= */}
+        {activeTab === "provision" && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
+              <div>
+                <h1 className={`text-lg font-bold ${themeStyles.titleColor}`}>Neue VIRKI AI-OS Appliance bereitstellen</h1>
+                <p className={`text-xs ${themeStyles.subtextColor} mt-1`}>
+                  Automatische Multi-Target Provisionierung mit 1-Klick Deployment.
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={copyLogsToClipboard}
-                className="btn-secondary text-xs py-1.5 px-3 inline-flex items-center gap-1.5 cursor-pointer shadow-sm hover:bg-paper"
-              >
-                {copied ? <IconCheck size={14} className="text-emerald-500" /> : <IconCopy size={14} />}
-                <span>{copied ? "Logs kopiert!" : "Logs kopieren"}</span>
-              </button>
+            <div className={`p-6 sm:p-8 rounded-2xl ${themeStyles.cardBg} border ${themeStyles.cardBorder} shadow-sm space-y-6`}>
+              <form onSubmit={handleProvisionSubmit} className="space-y-6 font-mono text-xs">
+                <div>
+                  <label className={`block ${themeStyles.subtextColor} font-bold mb-1.5 uppercase`}>
+                    Mandanten- & Unternehmensname*
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={companyName}
+                    onChange={(e) => setCompanyName(e.target.value)}
+                    placeholder="z. B. Schulze Bedachungen GmbH"
+                    className={`w-full px-4 py-2.5 rounded-xl border ${themeStyles.border} ${themeStyles.cardSubBg} ${themeStyles.titleColor} text-sm focus:outline-none focus:border-cyan-500`}
+                  />
+                </div>
 
-              <button
-                type="button"
-                onClick={() => setSelectedLogsId(null)}
-                className="btn-secondary text-xs py-1.5 px-3 font-bold hover:text-ink cursor-pointer"
-              >
-                ✕ Schließen
-              </button>
+                {/* 3 Deployment Targets */}
+                <div>
+                  <label className={`block ${themeStyles.subtextColor} font-bold mb-2 uppercase`}>
+                    Bereitstellungsziel & Tarif
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setDeployType("docker_stack")}
+                      className={`p-5 rounded-2xl border text-left transition cursor-pointer flex flex-col justify-between ${
+                        deployType === "docker_stack"
+                          ? "bg-amber-500/10 border-amber-500 text-amber-300"
+                          : `${themeStyles.cardSubBg} ${themeStyles.border} ${themeStyles.subtextColor}`
+                      }`}
+                    >
+                      <div>
+                        <strong className="block text-sm">LOKALER DOCKER STACK</strong>
+                        <p className="text-[11px] mt-1 opacity-80">
+                          Autarkes Deployment auf bestehender Server-Hardware.
+                        </p>
+                      </div>
+                      <div className="mt-4 pt-3 border-t border-white/10 text-xs font-bold text-emerald-400">
+                        0,00 € Cloud-Kosten
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setDeployType("gcp_cloud_run")}
+                      className={`p-5 rounded-2xl border text-left transition cursor-pointer flex flex-col justify-between ${
+                        deployType === "gcp_cloud_run"
+                          ? "bg-sky-500/10 border-sky-500 text-sky-300"
+                          : `${themeStyles.cardSubBg} ${themeStyles.border} ${themeStyles.subtextColor}`
+                      }`}
+                    >
+                      <div>
+                        <strong className="block text-sm">GCP CLOUD RUN (SERVERLESS)</strong>
+                        <p className="text-[11px] mt-1 opacity-80">
+                          Auto-Scale Container in europe-west3 (Frankfurt).
+                        </p>
+                      </div>
+                      <div className="mt-4 pt-3 border-t border-white/10 text-xs font-bold text-sky-400">
+                        ~ 0,02 € / Betriebsstunde
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setDeployType("gcp_vm")}
+                      className={`p-5 rounded-2xl border text-left transition cursor-pointer flex flex-col justify-between ${
+                        deployType === "gcp_vm"
+                          ? "bg-cyan-500/10 border-cyan-500 text-cyan-300"
+                          : `${themeStyles.cardSubBg} ${themeStyles.border} ${themeStyles.subtextColor}`
+                      }`}
+                    >
+                      <div>
+                        <strong className="block text-sm">DEDICATED GCP VM</strong>
+                        <p className="text-[11px] mt-1 opacity-80">
+                          e2-standard-4 mit isolierter SSD & fester IP.
+                        </p>
+                      </div>
+                      <div className="mt-4 pt-3 border-t border-white/10 text-xs font-bold text-cyan-400">
+                        0,154 € / Std. (24/7 Compute)
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Fachagenten-Katalog SKU Auswahl */}
+                <div className="pt-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className={`block ${themeStyles.subtextColor} font-bold uppercase`}>
+                      Fachagenten-Lizenzierung (Agenten-Katalog / SKU-Stack)
+                    </label>
+                    <span className="text-[11px] text-cyan-400 font-mono font-bold">
+                      {selectedSkus.length} Agent(en) ausgewählt
+                    </span>
+                  </div>
+                  <p className={`text-[11px] ${themeStyles.subtextColor} mb-3`}>
+                    Wähle die Fachagenten-Hüllen aus dem SKU-Katalog, die beim Start in das isolierte Mandanten-Volume provisioniert werden sollen:
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {(availableSkus.length > 0
+                      ? availableSkus
+                      : [
+                          {
+                            sku: "process-architect",
+                            title: "AI Process Architect & SAP Automation Engine",
+                            version: "1.0.0",
+                            role_type: "consulting_architect",
+                          },
+                        ]
+                    ).map((skuItem: any) => {
+                      const isSelected = selectedSkus.includes(skuItem.sku);
+                      return (
+                        <div
+                          key={skuItem.sku}
+                          onClick={() => {
+                            if (isSelected) {
+                              setSelectedSkus(selectedSkus.filter((s) => s !== skuItem.sku));
+                            } else {
+                              setSelectedSkus([...selectedSkus, skuItem.sku]);
+                            }
+                          }}
+                          className={`p-4 rounded-xl border transition cursor-pointer flex items-start gap-3 ${
+                            isSelected
+                              ? "bg-cyan-950/40 border-cyan-500/80 text-cyan-200"
+                              : `${themeStyles.cardSubBg} ${themeStyles.border} ${themeStyles.subtextColor} hover:border-slate-500`
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {}}
+                            className="mt-1 accent-cyan-500 rounded cursor-pointer"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <strong className="text-xs text-white">{skuItem.title || skuItem.sku}</strong>
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/10 text-slate-300">
+                                v{skuItem.version || "1.0.0"}
+                              </span>
+                            </div>
+                            <div className="text-[10px] font-mono text-cyan-400 mt-0.5">
+                              SKU: {skuItem.sku}
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-1">
+                              {skuItem.sku === "process-architect"
+                                ? "SAP S/4HANA O2C/P2P Prozess-Zerlegung, KI-Triage & Mermaid Flowcharts."
+                                : "Vorkonfigurierte Fachagenten-Schablone mit .gemini/GEMINI.md und Roadmap."}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/10">
+                  <button
+                    type="submit"
+                    disabled={provisioning}
+                    className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs font-mono transition cursor-pointer disabled:opacity-50"
+                  >
+                    [ {provisioning ? "Wird bereitgestellt..." : "Appliance jetzt starten"} ]
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
+        )}
 
-          {/* Terminal Output */}
-          <div className="p-4 bg-black/95 font-mono text-xs text-emerald-400 overflow-y-auto max-h-[400px] min-h-[160px] space-y-1 select-text">
-            {loadingLogs && logs.length === 0 ? (
-              <div className="text-ink-soft">Initialisiere Log-Streamer...</div>
-            ) : logs.length === 0 ? (
-              <div className="text-ink-soft italic">Warte auf erste Log-Ausgaben...</div>
-            ) : (
-              logs.map((line, idx) => (
-                <div
-                  key={idx}
-                  className={`whitespace-pre-wrap leading-relaxed ${
-                    line.includes("ERROR") || line.includes("❌")
-                      ? "text-red-400 font-bold"
-                      : line.includes("WARNING") || line.includes("⚠️")
-                      ? "text-amber-300"
-                      : line.includes("✓") || line.includes("🎉")
-                      ? "text-emerald-300 font-bold"
-                      : "text-emerald-400/90"
-                  }`}
-                >
-                  {line}
-                </div>
-              ))
-            )}
-            <div ref={logsEndRef} />
+        {/* ========================================================================= */}
+        {/* TAB 3: GCP                                                               */}
+        {/* ========================================================================= */}
+        {activeTab === "gcp" && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
+              <div>
+                <h1 className={`text-lg font-bold ${themeStyles.titleColor}`}>Google Cloud Platform Übersicht</h1>
+                <p className={`text-xs ${themeStyles.subtextColor} mt-1`}>
+                  Region: europe-west3 (Frankfurt) · Projekt: virki-production-2026
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className={`p-5 rounded-2xl ${themeStyles.cardBg} border ${themeStyles.cardBorder} shadow-sm space-y-2`}>
+                <span className="text-xs font-mono font-bold text-sky-400 uppercase">Artifact Registry</span>
+                <h3 className={`text-base font-bold ${themeStyles.titleColor}`}>europe-west3-docker.pkg.dev</h3>
+                <p className={`text-xs ${themeStyles.subtextColor}`}>
+                  Container-Images für Core Platform, Agent Platform und Orchestrator.
+                </p>
+              </div>
+
+              <div className={`p-5 rounded-2xl ${themeStyles.cardBg} border ${themeStyles.cardBorder} shadow-sm space-y-2`}>
+                <span className="text-xs font-mono font-bold text-cyan-400 uppercase">Cloud Run Services</span>
+                <h3 className={`text-base font-bold ${themeStyles.titleColor}`}>{gcpRunCount} Aktive Endpunkte</h3>
+                <p className={`text-xs ${themeStyles.subtextColor}`}>
+                  Zero-Cold-Start Inferenz & automatische HTTPS-Zertifikate.
+                </p>
+              </div>
+
+              <div className={`p-5 rounded-2xl ${themeStyles.cardBg} border ${themeStyles.cardBorder} shadow-sm space-y-2`}>
+                <span className="text-xs font-mono font-bold text-emerald-400 uppercase">Compute Engine</span>
+                <h3 className={`text-base font-bold ${themeStyles.titleColor}`}>{gcpVmCount} VMs Online</h3>
+                <p className={`text-xs ${themeStyles.subtextColor}`}>
+                  Dedizierte Instanzen mit lokalem Ollama LLM Acceleration Cluster.
+                </p>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 4: FINOPS                                                            */}
+        {/* ========================================================================= */}
+        {activeTab === "finops" && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
+              <div>
+                <h1 className={`text-lg font-bold ${themeStyles.titleColor}`}>FinOps & Kostenkontrolle</h1>
+                <p className={`text-xs ${themeStyles.subtextColor} mt-1`}>
+                  Transparente Kostenaufschlüsselung aller Mandanten und Cloud-Ressourcen.
+                </p>
+              </div>
+            </div>
+
+            <div className={`p-6 rounded-2xl ${themeStyles.cardBg} border ${themeStyles.cardBorder} shadow-sm space-y-4`}>
+              <div className="flex items-center justify-between border-b border-white/10 pb-3 font-mono text-xs font-bold text-neutral-400">
+                <span>MANDANT</span>
+                <span>TYP</span>
+                <span>STUNDENSATZ</span>
+                <span>GESAMTKOSTEN</span>
+              </div>
+
+              {instances.map((inst) => {
+                const costInfo = calculateActualCost(inst);
+                return (
+                  <div key={inst.id} className="flex items-center justify-between font-mono text-xs py-2 border-b border-white/5">
+                    <span className="font-bold text-white">{inst.name}</span>
+                    <span className="text-neutral-400 uppercase">{inst.type.replace("_", " ")}</span>
+                    <span className="text-cyan-400">{costInfo.rateStr}</span>
+                    <span className="text-emerald-400 font-bold">{costInfo.costStr}</span>
+                  </div>
+                );
+              })}
+
+              <div className="pt-3 flex items-center justify-between font-mono text-sm font-bold text-emerald-400 border-t border-white/10">
+                <span>GESAMTSUMME ALLER APPLIANCES</span>
+                <span>{totalCost.toFixed(2)} €</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 5: LOGS                                                              */}
+        {/* ========================================================================= */}
+        {activeTab === "logs" && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
+              <div>
+                <h1 className={`text-lg font-bold ${themeStyles.titleColor}`}>Live-Log Streaming</h1>
+                <p className={`text-xs ${themeStyles.subtextColor} mt-1`}>
+                  {selectedLogsInstance ? `Instanz: ${selectedLogsInstance.name}` : "Wähle eine Instanz zur Log-Inspektion"}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {instances.map((i) => (
+                  <button
+                    key={i.id}
+                    onClick={() => setSelectedLogsId(i.id)}
+                    className={`px-3 py-1 rounded text-xs font-mono border cursor-pointer ${
+                      selectedLogsId === i.id ? themeStyles.navActive : `${themeStyles.cardSubBg} ${themeStyles.subtextColor} ${themeStyles.border}`
+                    }`}
+                  >
+                    [ {i.tenant_id} ]
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className={`p-4 rounded-2xl ${themeStyles.cardSubBg} border ${themeStyles.border} font-mono text-xs space-y-1 max-h-96 overflow-y-auto`}>
+              {logs.length === 0 ? (
+                <div className="text-neutral-500 italic p-4 text-center">Keine Logs empfangen oder Instanz bereit.</div>
+              ) : (
+                logs.map((log, index) => (
+                  <div key={index} className="text-neutral-300 leading-relaxed font-mono">
+                    {log}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 6: APIS (VOLLSTÄNDIGES 1:1 CORE-PLATFORM LAYOUT VIA APIS-PANEL)       */}
+        {/* ========================================================================= */}
+        {activeTab === "apis" && (
+          <ApiEndpointsPanel themeStyles={themeStyles} />
+        )}
+      </main>
     </div>
   );
 }

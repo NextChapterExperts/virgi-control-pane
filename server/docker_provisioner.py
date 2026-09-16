@@ -75,34 +75,11 @@ def _sync_platform_repo(repo_dir: Path, instance_id: str) -> None:
     append_log(instance_id, "✓ GitHub Repository erfolgreich synchronisiert.")
 
 
-def _sync_agent_platform_repo(agent_dir: Path, instance_id: str) -> None:
-    """Synchronisiert das Agent-Platform Repository aus dem lokalen Projekt-Verzeichnis."""
-    local_source = Path("/home/peter/Projekte/1130-VIRKI-Agent-Platform")
-    if not local_source.exists():
-        for p in [Path.cwd().parent / "1130-VIRKI-Agent-Platform", Path.cwd().parent.parent / "1130-VIRKI-Agent-Platform"]:
-            if p.exists():
-                local_source = p
-                break
-
-    if local_source.exists() and (local_source / "server").exists():
-        append_log(instance_id, f"📥 Synchronisiere Agent-Platform aus ({local_source})...")
-        if agent_dir.exists():
-            shutil.rmtree(agent_dir, ignore_errors=True)
-        shutil.copytree(
-            local_source,
-            agent_dir,
-            ignore=shutil.ignore_patterns(".venv", "venv", ".next", "node_modules", ".pytest_cache", "*.log"),
-            symlinks=False,
-        )
-        append_log(instance_id, "✓ Agent-Platform erfolgreich synchronisiert.")
-
-
 def generate_install_script(
     tenant_id: str,
     company_name: str,
     web_port: int = 8190,
     api_port: int = 8191,
-    agent_port: int = 8192,
 ) -> str:
     """Generiert ein 1-Zeilen Bash Auto-Install Script für den Kunden-Server."""
     dist_repo_url = _get_dist_repo_url()
@@ -180,11 +157,12 @@ def provision_local_docker_stack_async(
     company_name: str,
     web_port: int = 8190,
     api_port: int = 8191,
+    selected_skus: Optional[List[str]] = None,
 ) -> None:
     """Startet einen lokalen Docker Stack im Hintergrund und streamt die Logs."""
     thread = threading.Thread(
         target=_provision_local_docker_stack_worker,
-        args=(instance_id, tenant_id, company_name, web_port, api_port),
+        args=(instance_id, tenant_id, company_name, web_port, api_port, selected_skus),
         daemon=True,
     )
     thread.start()
@@ -196,9 +174,9 @@ def _provision_local_docker_stack_worker(
     company_name: str,
     web_port: int,
     api_port: int,
+    selected_skus: Optional[List[str]] = None,
 ) -> None:
-    agent_port = web_port + 2
-    append_log(instance_id, f"🐳 Starte Bereitstellung des Docker-Stacks für '{company_name}' (Web: {web_port}, API: {api_port}, Agent: {agent_port})...")
+    append_log(instance_id, f"🐳 Starte Bereitstellung des Docker-Stacks für '{company_name}' (Port {web_port}/{api_port})...")
     
     # Nutze geteilten Pfad /tmp/virki_instances falls beschreibbar, sonst Fallback auf Home
     try:
@@ -212,11 +190,20 @@ def _provision_local_docker_stack_worker(
         repo_dir = target_dir / "repo"
         _sync_platform_repo(repo_dir, instance_id)
 
-        agent_dir = target_dir / "agent_platform"
-        _sync_agent_platform_repo(agent_dir, instance_id)
+        # Initialisiere Kunden-Projekt-Volume mit ausgewählten SKUs
+        projects_dir = target_dir / "data" / "projects"
+        projects_dir.mkdir(parents=True, exist_ok=True)
+        if selected_skus:
+            catalog_src = Path("/home/peter/Projekte/1130-VIRKI-Agent-Platform/catalog/agents")
+            for sku in selected_skus:
+                sku_src = catalog_src / sku
+                if sku_src.exists() and sku_src.is_dir():
+                    dest = projects_dir / sku
+                    shutil.copytree(sku_src, dest, dirs_exist_ok=True)
+                    append_log(instance_id, f"📦 Fachagent-SKU '{sku}' in Mandanten-Volume provisioniert.")
 
         docker_dir = repo_dir / "deploy" / "docker"
-        append_log(instance_id, f"⚙️ Generiere Docker-Compose Konfiguration (Web: {web_port}, API: {api_port}, Agent: {agent_port})...")
+        append_log(instance_id, f"⚙️ Generiere Docker-Compose Konfiguration (Web: {web_port}, API: {api_port})...")
 
         # Dynamisches docker-compose.yml schreiben
         compose_content = f"""services:
@@ -240,21 +227,7 @@ def _provision_local_docker_stack_worker(
       - AIOS_COMPANY_NAME={company_name}
     volumes:
       - virki-data-{tenant_id}:/app/data
-
-  virki-agent-platform:
-    build:
-      context: {agent_dir}
-      dockerfile: deploy/docker/Dockerfile
-    image: virki-agent-platform-{tenant_id}:latest
-    container_name: virki-agent-platform-{tenant_id}
-    restart: unless-stopped
-    ports:
-      - "{agent_port}:8092"
-    environment:
-      - PORT=8092
-      - CORE_PLATFORM_URL=http://ai-os-core:8091
-    depends_on:
-      - ai-os-core
+      - {projects_dir}:/app/active
 
 volumes:
   virki-data-{tenant_id}:

@@ -10,7 +10,9 @@ import asyncio
 import json
 import logging
 import os
+from pathlib import Path
 import re
+
 import socket
 import subprocess
 import uuid
@@ -87,6 +89,10 @@ class ProvisionRequest(BaseModel):
     machine_type: Optional[str] = Field("e2-standard-4", description="GCP-Maschinentyp")
     web_port: Optional[int] = Field(8190, description="Web-Port bei lokalem Docker-Stack")
     api_port: Optional[int] = Field(8191, description="API-Port bei lokalem Docker-Stack")
+    selected_skus: Optional[List[str]] = Field(
+        default_factory=list, description="Liste der zu provisionierenden Fachagenten-SKUs aus dem Katalog"
+    )
+
 
 
 # -----------------------------------------------------------------------------
@@ -145,6 +151,7 @@ def _find_free_ports(start_web: int = 8200, start_api: int = 8201) -> tuple[int,
 # -----------------------------------------------------------------------------
 
 @app.get("/health")
+@app.get("/v1/health")
 def api_health():
     return {"status": "ok", "service": "virki-control-plane"}
 
@@ -258,8 +265,58 @@ def api_provision_instance(req: ProvisionRequest):
             company_name=req.company_name,
             web_port=web_port,
             api_port=api_port,
+            selected_skus=req.selected_skus,
         )
         return {"status": "ok", "message": "Docker Stack Bereitstellung gestartet", "instance": inst}
+
+
+@app.get("/v1/catalog/agents")
+async def get_catalog_agents() -> List[Dict[str, Any]]:
+    """Fragt den Agenten-Katalog aus der Agent Platform oder lokalen Pfaden ab."""
+    # 1. Versuche Agent Platform API auf Port 8093
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            res = await client.get("http://127.0.0.1:8093/v1/catalog/agents")
+            if res.status_code == 200:
+                return res.json()
+    except Exception:
+        pass
+
+    # 2. Fallback: Lokaler Pfad in 1130-VIRKI-Agent-Platform/catalog/agents
+    local_catalog = Path("/home/peter/Projekte/1130-VIRKI-Agent-Platform/catalog/agents")
+    if local_catalog.exists():
+        skus = []
+        for d in sorted(local_catalog.iterdir()):
+            if d.is_dir() and not d.name.startswith("."):
+                skus.append({
+                    "sku": d.name,
+                    "title": d.name.replace("-", " ").title(),
+                    "version": "1.0.0",
+                    "role_type": "specialist_agent",
+                    "capabilities": [
+                        {"tool": "web_search"},
+                        {"tool": "filesystem:local"},
+                        {"tool": "brain:ask"},
+                        {"tool": "brain:ingest"}
+                    ],
+                    "path": str(d),
+                })
+        return skus
+
+    return [
+        {
+            "sku": "process-architect",
+            "title": "AI Process Architect & SAP Automation Engine",
+            "version": "1.0.0",
+            "role_type": "specialist_agent",
+            "capabilities": [
+                {"tool": "web_search"},
+                {"tool": "filesystem:local"},
+                {"tool": "brain:ask"},
+                {"tool": "brain:ingest"}
+            ],
+        }
+    ]
 
 
 @app.post("/v1/instances/{instance_id}/pause")
