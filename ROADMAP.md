@@ -76,3 +76,10 @@ Die Control Plane ist das autarke Betreiber- und Flotten-Management für alle VI
 - **Automatische IP-Synchronisation:** Live-Abgleich geänderter Ephemeral-IPs von Google Compute VMs.
 - **Master-Testsuite:** `./scripts/run-all-tests.sh` läuft zu 100% fehlerfrei (**6/6 Pytest Tests bestanden**).
 - **Roadmap Phase 7:** Spezifikation der Enterprise-Härtung (Backup, DR, WireGuard, Auto-Healing, Hetzner Provider) dokumentiert.
+
+### 2026-09-16 (BTC BTP Speicher-Plattform & MCP Gateway Integration)
+- **BTC BTP Speicher-Plattform (`btp-consulting-training`):** Instanz im Flotten-Management registriert (Port 8200 Web / 8201 API).
+- **Reine Speicher-Nutzung (Architecture Policy):** Betrieb exklusiv als persistenter Gedächtnis- und Wissensspeicher ($\mathcal{S}_1-\mathcal{S}_5$, Wissensgraph, Brain Ingest `/v1/brain/ingest`, `/v1/brain/ask`, `/v1/search`) für SAP BTP Consulting & Training Projekte. Keine Ausführung von Fachagenten auf dieser Instanz.
+- **MCP SSE Anbindung:** Nahtlose Integration mit `btc_mcp_server.py` (SSE Port 8096) zur direkten Speisung von Wissen aus BTP-Projekten.
+- **Autostart-Verankerung:** Systemd User Unit `aios-instance-btp-consulting.service` verknüpft mit `aios-ecosystem.target`.
+

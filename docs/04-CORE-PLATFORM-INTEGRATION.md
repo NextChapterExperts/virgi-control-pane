@@ -35,3 +35,14 @@ In der Control Plane (`http://localhost:8280`) besitzt jede Instanz in der Flott
 - **Bei GCP Compute Engine VM:** Verweist auf `http://{öffentliche_ip}:8090`.
 
 Beim ersten Aufruf startet der Mandant mit einer sauberen Datenbank (Clean Slate) und kann im Setup-Assistenten sein Unternehmensprofil konfigurieren.
+
+---
+
+## 💾 3. Dedizierter Speicher-Modus ("Reine Speicher-Nutzung")
+
+Für Mandanten oder Projekt-Kontexte, die ihre Fachlogik und Agenten extern (z.B. in IDEs, Cursor oder BTP-Fachprojekten) ausführen, kann eine Core Platform Instanz im **reinen Speicher-Modus** betrieben werden (wie die **BTC BTP Speicher-Plattform** auf Port 8200/8201):
+
+- **Fokus:** 5-Schichten-Gedächtnis ($\mathcal{S}_1-\mathcal{S}_5$), Wissensgraph, Brain Ingest (`/v1/brain/ingest`) und Volltextsuche (`/v1/search`, `/v1/brain/ask`).
+- **Entkopplung:** Keine Ausführung von autonomen Fachagenten auf der Appliance. Die BTP-Berater und Entwickler nutzen die Appliance rein als hochverfügbare Wissens- und Gedächtnisdatenbank.
+- **MCP Gateway:** Der Zugriff erfolgt standardisiert über den Model Context Protocol SSE-Server (`btc_mcp_server.py`, Port 8096), der Wissen aus den BTP-Repositories direkt in die Appliance spiegelt.
+
